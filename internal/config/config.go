@@ -23,6 +23,14 @@ const (
 	defaultDatabaseMaxIdleConns  = 5
 	defaultDatabaseConnLifetime  = 30 * time.Minute
 	defaultDatabaseConnectTime   = 5 * time.Second
+	defaultDubboInterface        = "attendance.v1.AttendanceService"
+	defaultDubboGroup            = "DEFAULT_GROUP"
+	defaultDubboVersion          = "1.0.0"
+	defaultDubboProtocol         = "triple"
+	defaultDubboPort             = 20000
+	defaultNacosAddress          = "127.0.0.1:8848"
+	defaultNacosNamespace        = "public"
+	defaultNacosGroup            = "DEFAULT_GROUP"
 	defaultLogLevel              = "info"
 )
 
@@ -36,6 +44,8 @@ type Config struct {
 	HTTP     HTTPConfig     `toml:"http"`
 	Database DatabaseConfig `toml:"database"`
 	Log      LogConfig      `toml:"log"`
+	Dubbo    DubboConfig    `toml:"dubbo"`
+	Nacos    NacosConfig    `toml:"nacos"`
 }
 
 type AppConfig struct {
@@ -65,6 +75,25 @@ type DatabaseConfig struct {
 type LogConfig struct {
 	Level    string `toml:"level"`
 	FilePath string `toml:"file_path"`
+}
+
+type DubboConfig struct {
+	Enabled     bool   `toml:"enabled"`
+	Interface   string `toml:"interface"`
+	Group       string `toml:"group"`
+	Version     string `toml:"version"`
+	Protocol    string `toml:"protocol"`
+	Port        int    `toml:"port"`
+	AdvertiseIP string `toml:"advertise_ip"`
+}
+
+type NacosConfig struct {
+	Enabled   bool   `toml:"enabled"`
+	Address   string `toml:"address"`
+	Namespace string `toml:"namespace"`
+	Group     string `toml:"group"`
+	Username  string `toml:"username"`
+	Password  string `toml:"password"`
 }
 
 type Duration time.Duration
@@ -155,6 +184,18 @@ func defaultConfig() *Config {
 			ConnMaxLifetime: Duration(defaultDatabaseConnLifetime),
 			ConnectTimeout:  Duration(defaultDatabaseConnectTime),
 		},
+		Dubbo: DubboConfig{
+			Interface: defaultDubboInterface,
+			Group:     defaultDubboGroup,
+			Version:   defaultDubboVersion,
+			Protocol:  defaultDubboProtocol,
+			Port:      defaultDubboPort,
+		},
+		Nacos: NacosConfig{
+			Address:   defaultNacosAddress,
+			Namespace: defaultNacosNamespace,
+			Group:     defaultNacosGroup,
+		},
 		Log: LogConfig{
 			Level: defaultLogLevel,
 		},
@@ -224,6 +265,54 @@ func (c *Config) validate() error {
 	}
 	if c.Database.ConnectTimeout <= 0 {
 		c.Database.ConnectTimeout = Duration(defaultDatabaseConnectTime)
+	}
+
+	c.Dubbo.Interface = strings.TrimSpace(c.Dubbo.Interface)
+	if c.Dubbo.Interface == "" {
+		c.Dubbo.Interface = defaultDubboInterface
+	}
+	c.Dubbo.Group = strings.TrimSpace(c.Dubbo.Group)
+	if c.Dubbo.Group == "" {
+		c.Dubbo.Group = defaultDubboGroup
+	}
+	c.Dubbo.Version = strings.TrimSpace(c.Dubbo.Version)
+	if c.Dubbo.Version == "" {
+		c.Dubbo.Version = defaultDubboVersion
+	}
+	c.Dubbo.Protocol = strings.ToLower(strings.TrimSpace(c.Dubbo.Protocol))
+	if c.Dubbo.Protocol == "" {
+		c.Dubbo.Protocol = defaultDubboProtocol
+	}
+	if c.Dubbo.Enabled && c.Dubbo.Protocol != defaultDubboProtocol {
+		return fmt.Errorf("config error: unsupported dubbo.protocol %q", c.Dubbo.Protocol)
+	}
+	if c.Dubbo.Port <= 0 {
+		c.Dubbo.Port = defaultDubboPort
+	}
+	c.Dubbo.AdvertiseIP = strings.TrimSpace(c.Dubbo.AdvertiseIP)
+	if c.Dubbo.Enabled && c.Dubbo.AdvertiseIP == "" {
+		return fmt.Errorf("config error: dubbo.advertise_ip cannot be empty when dubbo.enabled is true")
+	}
+	if c.Dubbo.Enabled {
+		c.Nacos.Enabled = true
+	}
+
+	c.Nacos.Address = strings.TrimSpace(c.Nacos.Address)
+	if c.Nacos.Address == "" {
+		c.Nacos.Address = defaultNacosAddress
+	}
+	c.Nacos.Namespace = strings.TrimSpace(c.Nacos.Namespace)
+	if c.Nacos.Namespace == "" {
+		c.Nacos.Namespace = defaultNacosNamespace
+	}
+	c.Nacos.Group = strings.TrimSpace(c.Nacos.Group)
+	if c.Nacos.Group == "" {
+		c.Nacos.Group = defaultNacosGroup
+	}
+	c.Nacos.Username = strings.TrimSpace(c.Nacos.Username)
+	c.Nacos.Password = strings.TrimSpace(c.Nacos.Password)
+	if c.Nacos.Enabled && c.Nacos.Address == "" {
+		return fmt.Errorf("config error: nacos.address cannot be empty when nacos.enabled is true")
 	}
 
 	c.Log.Level = strings.ToLower(strings.TrimSpace(c.Log.Level))

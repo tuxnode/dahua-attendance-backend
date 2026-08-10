@@ -19,6 +19,23 @@ max_idle_conns = 5
 conn_max_lifetime = "30m"
 connect_timeout = "5s"
 
+[dubbo]
+enabled = false
+interface = "attendance.v1.AttendanceService"
+group = "DEFAULT_GROUP"
+version = "1.0.0"
+protocol = "triple"
+port = 20000
+advertise_ip = ""
+
+[nacos]
+enabled = false
+address = "127.0.0.1:8848"
+namespace = "public"
+group = "DEFAULT_GROUP"
+username = ""
+password = ""
+
 [log]
 level = "info"
 file_path = ""
