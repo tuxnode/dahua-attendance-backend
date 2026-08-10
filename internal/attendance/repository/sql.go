@@ -47,10 +47,14 @@ INSERT INTO attendance_records (
 	user_type,
 	error_code,
 	block_id,
+	dedup_block_id,
 	image_count,
 	raw_event,
 	received_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+	raw_event = VALUES(raw_event),
+	received_at = VALUES(received_at)`
 
 	_, err := r.executor.ExecContext(
 		ctx,
@@ -74,6 +78,7 @@ INSERT INTO attendance_records (
 		record.UserType,
 		record.ErrorCode,
 		record.BlockID,
+		dedupBlockID(record.BlockID),
 		record.ImageCount,
 		record.RawEvent,
 		record.ReceivedAt,
@@ -83,6 +88,14 @@ INSERT INTO attendance_records (
 	}
 
 	return nil
+}
+
+func dedupBlockID(blockID int64) any {
+	if blockID <= 0 {
+		return nil
+	}
+
+	return blockID
 }
 
 func (r *SQLRepository) SaveDoorStatusRecord(ctx context.Context, record domain.DoorStatusRecord) error {

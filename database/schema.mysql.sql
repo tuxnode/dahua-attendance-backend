@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS attendance_records (
     user_type INT NOT NULL DEFAULT 0,
     error_code INT NOT NULL DEFAULT 0,
     block_id BIGINT NOT NULL DEFAULT 0,
+    dedup_block_id BIGINT NULL,
     image_count INT NOT NULL DEFAULT 0,
     raw_event JSON NULL,
     received_at DATETIME NOT NULL,
@@ -26,7 +27,8 @@ CREATE TABLE IF NOT EXISTS attendance_records (
     KEY idx_attendance_event_time (event_time),
     KEY idx_attendance_user_event_time (user_id, event_time),
     KEY idx_attendance_device_event_time (device_sn, event_time),
-    KEY idx_attendance_block_id (block_id)
+    KEY idx_attendance_block_id (block_id),
+    UNIQUE KEY uniq_attendance_device_block (device_sn, dedup_block_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS door_status_records (

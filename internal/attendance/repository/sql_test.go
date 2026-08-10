@@ -63,6 +63,7 @@ func TestSQLRepositorySavesAttendanceRecord(t *testing.T) {
 		UTC:        1700000000,
 		RealUTC:    1700000000,
 		DataSource: domain.DataSourceOffline,
+		BlockID:    10001,
 		ImageCount: 1,
 		RawEvent:   []byte(`{"Code":"AccessControl"}`),
 		ReceivedAt: fixedTime(),
@@ -74,11 +75,50 @@ func TestSQLRepositorySavesAttendanceRecord(t *testing.T) {
 	if !strings.Contains(executor.query, "INSERT INTO attendance_records") {
 		t.Fatalf("unexpected query: %s", executor.query)
 	}
-	if len(executor.args) != 22 {
+	if !strings.Contains(executor.query, "ON DUPLICATE KEY UPDATE") {
+		t.Fatalf("query should handle duplicate records: %s", executor.query)
+	}
+	if len(executor.args) != 23 {
 		t.Fatalf("unexpected args length: %d", len(executor.args))
 	}
 	if executor.args[0] != "REDACTED_DEVICE_SN" {
 		t.Fatalf("unexpected first arg: %v", executor.args[0])
+	}
+	if executor.args[18] != int64(10001) {
+		t.Fatalf("unexpected block id arg: %v", executor.args[18])
+	}
+	if executor.args[19] != int64(10001) {
+		t.Fatalf("unexpected dedup block id arg: %v", executor.args[19])
+	}
+}
+
+func TestSQLRepositoryDoesNotDeduplicateAttendanceRecordWithoutBlockID(t *testing.T) {
+	executor := &fakeExecutor{}
+	repo, err := repository.NewSQLRepository(executor)
+	if err != nil {
+		t.Fatalf("new repository: %v", err)
+	}
+
+	err = repo.SaveAttendanceRecord(context.Background(), domain.AttendanceRecord{
+		DeviceSN:   "REDACTED_DEVICE_SN",
+		Method:     domain.AccessMethodButton,
+		Direction:  domain.AccessDirectionExit,
+		Status:     1,
+		EventTime:  fixedTime(),
+		ReceivedAt: fixedTime(),
+	})
+	if err != nil {
+		t.Fatalf("save attendance record: %v", err)
+	}
+
+	if len(executor.args) != 23 {
+		t.Fatalf("unexpected args length: %d", len(executor.args))
+	}
+	if executor.args[18] != int64(0) {
+		t.Fatalf("unexpected block id arg: %v", executor.args[18])
+	}
+	if executor.args[19] != nil {
+		t.Fatalf("dedup block id should be nil for empty block id: %v", executor.args[19])
 	}
 }
 
