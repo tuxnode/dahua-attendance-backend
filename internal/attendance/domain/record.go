@@ -27,6 +27,15 @@ type AttendanceRecord struct {
 	ReceivedAt time.Time
 }
 
+type AttendanceRecordQuery struct {
+	UserID    string
+	DeviceSN  string
+	StartTime time.Time
+	EndTime   time.Time
+	Limit     int
+	Offset    int
+}
+
 type DoorStatusRecord struct {
 	DeviceSN   string
 	Status     DoorState

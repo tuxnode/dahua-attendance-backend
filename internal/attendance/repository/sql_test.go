@@ -13,18 +13,25 @@ import (
 )
 
 type fakeExecutor struct {
-	query string
-	args  []any
-	err   error
+	query    string
+	args     []any
+	execErr  error
+	queryErr error
 }
 
 func (e *fakeExecutor) ExecContext(_ context.Context, query string, args ...any) (sql.Result, error) {
 	e.query = query
 	e.args = args
-	if e.err != nil {
-		return nil, e.err
+	if e.execErr != nil {
+		return nil, e.execErr
 	}
 	return fakeResult(1), nil
+}
+
+func (e *fakeExecutor) QueryContext(_ context.Context, query string, args ...any) (*sql.Rows, error) {
+	e.query = query
+	e.args = args
+	return nil, e.queryErr
 }
 
 type fakeResult int64
@@ -153,8 +160,68 @@ func TestSQLRepositorySavesDoorStatusRecord(t *testing.T) {
 	}
 }
 
+func TestSQLRepositoryListsAttendanceRecordsWithFilters(t *testing.T) {
+	executor := &fakeExecutor{queryErr: errors.New("query failed")}
+	repo, err := repository.NewSQLRepository(executor)
+	if err != nil {
+		t.Fatalf("new repository: %v", err)
+	}
+
+	startTime := fixedTime().Add(-time.Hour)
+	endTime := fixedTime()
+	_, err = repo.ListAttendanceRecords(context.Background(), domain.AttendanceRecordQuery{
+		UserID:    "REDACTED_USER_ID",
+		DeviceSN:  "REDACTED_DEVICE_SN",
+		StartTime: startTime,
+		EndTime:   endTime,
+		Limit:     50,
+		Offset:    100,
+	})
+	if err == nil {
+		t.Fatal("expected query error")
+	}
+
+	for _, want := range []string{
+		"FROM attendance_records",
+		"AND user_id = ?",
+		"AND device_sn = ?",
+		"AND event_time >= ?",
+		"AND event_time <= ?",
+		"ORDER BY event_time DESC, id DESC",
+		"LIMIT ? OFFSET ?",
+	} {
+		if !strings.Contains(executor.query, want) {
+			t.Fatalf("query should contain %q: %s", want, executor.query)
+		}
+	}
+	if strings.Contains(executor.query, "raw_event") {
+		t.Fatalf("query should not expose raw_event: %s", executor.query)
+	}
+	if len(executor.args) != 6 {
+		t.Fatalf("unexpected args length: %d", len(executor.args))
+	}
+	if executor.args[0] != "REDACTED_USER_ID" {
+		t.Fatalf("unexpected user id arg: %v", executor.args[0])
+	}
+	if executor.args[1] != "REDACTED_DEVICE_SN" {
+		t.Fatalf("unexpected device sn arg: %v", executor.args[1])
+	}
+	if executor.args[2] != startTime {
+		t.Fatalf("unexpected start time arg: %v", executor.args[2])
+	}
+	if executor.args[3] != endTime {
+		t.Fatalf("unexpected end time arg: %v", executor.args[3])
+	}
+	if executor.args[4] != 50 {
+		t.Fatalf("unexpected limit arg: %v", executor.args[4])
+	}
+	if executor.args[5] != 100 {
+		t.Fatalf("unexpected offset arg: %v", executor.args[5])
+	}
+}
+
 func TestSQLRepositoryWrapsExecutorError(t *testing.T) {
-	executor := &fakeExecutor{err: errors.New("database failed")}
+	executor := &fakeExecutor{execErr: errors.New("database failed")}
 	repo, err := repository.NewSQLRepository(executor)
 	if err != nil {
 		t.Fatalf("new repository: %v", err)

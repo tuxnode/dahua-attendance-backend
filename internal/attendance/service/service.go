@@ -13,6 +13,11 @@ import (
 	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/repository"
 )
 
+const (
+	defaultQueryLimit = 100
+	maxQueryLimit     = 500
+)
+
 type Service struct {
 	repository repository.Repository
 	logger     *slog.Logger
@@ -68,6 +73,24 @@ func (s *Service) HandleDevicePayload(ctx context.Context, payload *parser.Parse
 	return nil
 }
 
+func (s *Service) ListAttendanceRecords(ctx context.Context, query domain.AttendanceRecordQuery) ([]domain.AttendanceRecord, error) {
+	if s.repository == nil {
+		return nil, errors.New("service: repository is nil")
+	}
+
+	normalized, err := normalizeAttendanceRecordQuery(query)
+	if err != nil {
+		return nil, err
+	}
+
+	records, err := s.repository.ListAttendanceRecords(ctx, normalized)
+	if err != nil {
+		return nil, fmt.Errorf("service: list attendance records: %w", err)
+	}
+
+	return records, nil
+}
+
 func (s *Service) handleEvent(ctx context.Context, envelope domain.EventEnvelope) error {
 	switch envelope.Code {
 	case domain.EventCodeAccessControl:
@@ -77,6 +100,24 @@ func (s *Service) handleEvent(ctx context.Context, envelope domain.EventEnvelope
 	default:
 		return fmt.Errorf("unsupported event code %q", envelope.Code)
 	}
+}
+
+func normalizeAttendanceRecordQuery(query domain.AttendanceRecordQuery) (domain.AttendanceRecordQuery, error) {
+	if !query.StartTime.IsZero() && !query.EndTime.IsZero() && query.EndTime.Before(query.StartTime) {
+		return domain.AttendanceRecordQuery{}, errors.New("service: end time must not be before start time")
+	}
+
+	if query.Limit <= 0 {
+		query.Limit = defaultQueryLimit
+	}
+	if query.Limit > maxQueryLimit {
+		query.Limit = maxQueryLimit
+	}
+	if query.Offset < 0 {
+		query.Offset = 0
+	}
+
+	return query, nil
 }
 
 func (s *Service) handleAccessControl(ctx context.Context, envelope domain.EventEnvelope) error {

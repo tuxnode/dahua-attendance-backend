@@ -18,6 +18,7 @@ import (
 type fakeRepository struct {
 	attendanceRecords []domain.AttendanceRecord
 	doorStatusRecords []domain.DoorStatusRecord
+	query             domain.AttendanceRecordQuery
 	err               error
 }
 
@@ -35,6 +36,14 @@ func (r *fakeRepository) SaveDoorStatusRecord(_ context.Context, record domain.D
 	}
 	r.doorStatusRecords = append(r.doorStatusRecords, record)
 	return nil
+}
+
+func (r *fakeRepository) ListAttendanceRecords(_ context.Context, query domain.AttendanceRecordQuery) ([]domain.AttendanceRecord, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	r.query = query
+	return append([]domain.AttendanceRecord(nil), r.attendanceRecords...), nil
 }
 
 func TestHandleDevicePayloadWritesAttendanceRecord(t *testing.T) {
@@ -166,6 +175,68 @@ func TestHandleDevicePayloadRejectsNilPayload(t *testing.T) {
 	svc := service.New(&fakeRepository{}, service.WithLogger(discardLogger()))
 
 	err := svc.HandleDevicePayload(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestListAttendanceRecordsNormalizesPagination(t *testing.T) {
+	repo := &fakeRepository{
+		attendanceRecords: []domain.AttendanceRecord{
+			{UserID: "REDACTED_USER_ID"},
+		},
+	}
+	svc := service.New(repo, service.WithLogger(discardLogger()))
+
+	records, err := svc.ListAttendanceRecords(context.Background(), domain.AttendanceRecordQuery{
+		Limit:  -1,
+		Offset: -1,
+	})
+	if err != nil {
+		t.Fatalf("list records: %v", err)
+	}
+
+	if len(records) != 1 {
+		t.Fatalf("unexpected records length: %d", len(records))
+	}
+	if repo.query.Limit != 100 {
+		t.Fatalf("unexpected limit: %d", repo.query.Limit)
+	}
+	if repo.query.Offset != 0 {
+		t.Fatalf("unexpected offset: %d", repo.query.Offset)
+	}
+}
+
+func TestListAttendanceRecordsClampsLargeLimit(t *testing.T) {
+	repo := &fakeRepository{}
+	svc := service.New(repo, service.WithLogger(discardLogger()))
+
+	_, err := svc.ListAttendanceRecords(context.Background(), domain.AttendanceRecordQuery{Limit: 1000})
+	if err != nil {
+		t.Fatalf("list records: %v", err)
+	}
+
+	if repo.query.Limit != 500 {
+		t.Fatalf("unexpected limit: %d", repo.query.Limit)
+	}
+}
+
+func TestListAttendanceRecordsRejectsInvalidTimeRange(t *testing.T) {
+	svc := service.New(&fakeRepository{}, service.WithLogger(discardLogger()))
+
+	_, err := svc.ListAttendanceRecords(context.Background(), domain.AttendanceRecordQuery{
+		StartTime: fixedNow(),
+		EndTime:   fixedNow().Add(-time.Second),
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestListAttendanceRecordsReturnsRepositoryError(t *testing.T) {
+	svc := service.New(&fakeRepository{err: errors.New("query failed")}, service.WithLogger(discardLogger()))
+
+	_, err := svc.ListAttendanceRecords(context.Background(), domain.AttendanceRecordQuery{Limit: 10})
 	if err == nil {
 		t.Fatal("expected error")
 	}
