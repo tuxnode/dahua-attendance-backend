@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -126,6 +127,38 @@ func TestHandleDevicePayloadReturnsRepositoryError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestHandleDevicePayloadLogsDoNotIncludeSensitiveFields(t *testing.T) {
+	repo := &fakeRepository{}
+	var logs bytes.Buffer
+
+	svc := service.New(
+		repo,
+		service.WithLogger(slog.New(slog.NewJSONHandler(&logs, nil))),
+		service.WithNow(fixedNow),
+	)
+
+	err := svc.HandleDevicePayload(context.Background(), &parser.ParsedPayload{
+		Events: []domain.EventEnvelope{
+			accessControlEnvelope(t),
+			doorStatusEnvelope(t),
+		},
+	})
+	if err != nil {
+		t.Fatalf("handle payload: %v", err)
+	}
+
+	output := logs.String()
+	for _, forbidden := range []string{
+		"REDACTED_DEVICE_SN",
+		"REDACTED_USER_ID",
+		"REDACTED_NAME",
+	} {
+		if bytes.Contains([]byte(output), []byte(forbidden)) {
+			t.Fatalf("log output contains sensitive field %q: %s", forbidden, output)
+		}
 	}
 }
 
