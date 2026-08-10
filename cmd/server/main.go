@@ -15,6 +15,7 @@ import (
 	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/repository"
 	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/service"
 	"github.com/tuxnode/dahua-attendance-backend/internal/config"
+	transportdubbo "github.com/tuxnode/dahua-attendance-backend/internal/transport/dubbo"
 	transporthttp "github.com/tuxnode/dahua-attendance-backend/internal/transport/http"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -38,11 +39,11 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz)
 
-	consumer, cleanup := buildConsumer(cfg.Database, logger)
+	attendanceService, cleanup := buildAttendanceService(cfg.Database, logger)
 	defer cleanup()
 
 	handler := transporthttp.NewHandler(
-		consumer,
+		attendanceService,
 		transporthttp.WithLogger(logger),
 		transporthttp.WithMaxBodyBytes(cfg.HTTP.MaxBodyBytes),
 	)
@@ -59,8 +60,20 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
 
-	errCh := make(chan error, 1)
+	dubboServer, err := transportdubbo.NewServer(
+		*cfg,
+		transportdubbo.NewAttendanceProvider(attendanceService),
+		logger,
+	)
+	if err != nil {
+		logger.Error("create dubbo server failed", "error", err)
+		os.Exit(1)
+	}
+
+	errCh := make(chan componentError, 2)
 	go func() {
 		logger.Info(
 			"device HTTP server started",
@@ -70,21 +83,48 @@ func main() {
 			"paths", []string{transporthttp.DefaultPath, transporthttp.DeviceEventsPath},
 			"health_path", "/healthz",
 		)
-		errCh <- server.ListenAndServe()
+		err := server.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- componentError{name: "http", err: err}
+			return
+		}
+		errCh <- componentError{name: "http"}
 	}()
 
+	if dubboServer != nil {
+		go func() {
+			err := dubboServer.Start(runCtx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				errCh <- componentError{name: "dubbo", err: err}
+				return
+			}
+			errCh <- componentError{name: "dubbo"}
+		}()
+	} else {
+		logger.Info("dubbo server disabled")
+	}
+
 	select {
-	case err := <-errCh:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("device HTTP server failed", "error", err)
+	case result := <-errCh:
+		if result.err != nil {
+			cancelRun()
+			logger.Error("server component failed", "component", result.name, "error", result.err)
 			os.Exit(1)
 		}
 	case <-ctx.Done():
 		logger.Info("shutdown signal received")
 	}
 
+	cancelRun()
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTP.ShutdownTimeout.Std())
 	defer cancel()
+
+	if dubboServer != nil {
+		if err := dubboServer.Stop(shutdownCtx); err != nil {
+			logger.Warn("dubbo server shutdown failed", "error", err)
+		}
+	}
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("device HTTP server shutdown failed", "error", err)
@@ -94,7 +134,12 @@ func main() {
 	logger.Info("device HTTP server stopped")
 }
 
-func buildConsumer(cfg config.DatabaseConfig, logger *slog.Logger) (transporthttp.EventConsumer, func()) {
+type componentError struct {
+	name string
+	err  error
+}
+
+func buildAttendanceService(cfg config.DatabaseConfig, logger *slog.Logger) (*service.Service, func()) {
 	db, err := sql.Open(cfg.Driver, cfg.DSN)
 	if err != nil {
 		logger.Error("open database failed", "driver", cfg.Driver, "error", err)

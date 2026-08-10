@@ -6,16 +6,14 @@
 
 ## 项目状态
 
-当前已完成设备 HTTP 上报接入、JSON/multipart 解析、考勤记录与门状态记录入库、基础去重、配置文件启动，以及 Web 查询服务的 Provider 适配层。
-
-Dubbo-Go 与 Nacos 的真实服务注册/发现尚未接入。
+当前已完成设备 HTTP 上报接入、JSON/multipart 解析、考勤记录与门状态记录入库、基础去重、配置文件启动，以及 Dubbo-Go + Nacos 服务注册入口。
 
 ## 技术栈
 
 - Go `1.26.5`
 - MySQL
 - TOML 配置文件
-- Dubbo-Go / Nacos（后续接入服务注册与发现）
+- Dubbo-Go / Nacos
 - HTTP POST
 - JSON；包含抓拍图片时支持 `multipart/x-mixed-replace`、`multipart/form-data`
 
@@ -89,12 +87,31 @@ max_idle_conns = 5
 conn_max_lifetime = "30m"
 connect_timeout = "5s"
 
+[dubbo]
+enabled = false
+interface = "attendance.v1.AttendanceService"
+group = "DEFAULT_GROUP"
+version = "1.0.0"
+protocol = "triple"
+port = 20000
+advertise_ip = ""
+
+[nacos]
+enabled = false
+address = "127.0.0.1:8848"
+namespace = "public"
+group = "DEFAULT_GROUP"
+username = ""
+password = ""
+
 [log]
 level = "info"
 file_path = ""
 ```
 
 `log.file_path` 为空时日志输出到标准输出。配置文件缺失、`app.name` 为空、`database.dsn` 为空或日志级别非法时，服务会启动失败。
+
+启用 Dubbo-Go 服务注册时，将 `dubbo.enabled` 设置为 `true`，并填写 Web 服务可访问的 `dubbo.advertise_ip`。`dubbo.enabled = true` 时会自动启用 Nacos 注册。
 
 ### 检查工程
 
@@ -127,7 +144,7 @@ go test ./...
 
 `api/attendance/v1` 定义 Web 查询侧使用的请求、响应和 DTO。
 
-`internal/transport/dubbo` 已实现 `AttendanceProvider` 适配层，负责把外部查询请求转换为内部 `attendance/service` 查询。当前尚未启动真实 Dubbo-Go Provider，也尚未注册到 Nacos。
+`internal/transport/dubbo` 已实现 `AttendanceProvider` 适配层和 Dubbo-Go server 启动封装。启用 `dubbo.enabled` 后，服务会使用 Triple 协议并通过 Nacos 注册 `attendance.v1.AttendanceService`。
 
 ## 开发说明
 
