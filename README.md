@@ -11,7 +11,8 @@
 ## 技术栈
 
 - Go `1.26.5`
-- Nacos Go SDK `v2.3.5`
+- MySQL
+- Nacos Go SDK（后续接入服务注册与配置）
 - HTTP POST
 - JSON；包含抓拍图片时支持 `multipart/form-data`
 
@@ -20,6 +21,7 @@
 ```text
 .
 ├── cmd/          # 应用程序入口
+├── database/     # 数据库初始化脚本
 ├── internal/     # 业务实现及内部模块
 ├── REVERSE.md    # 门禁设备 HTTP 主动上传协议说明
 ├── go.mod        # Go 模块及依赖定义
@@ -39,9 +41,28 @@
 go mod download
 ```
 
-### 检查工程
+### 初始化数据库
 
-当前仓库尚未包含可测试的 Go package。业务代码添加后，可使用以下命令运行全部测试：
+```bash
+mysql -h 127.0.0.1 -u root -p dahua_attendance < database/schema.mysql.sql
+```
+
+### 启动服务
+
+未配置数据库时，服务只解析并输出脱敏日志：
+
+```bash
+go run ./cmd/server
+```
+
+配置 MySQL 后，通行记录和门状态记录会写入数据库：
+
+```bash
+DB_DSN='user:password@tcp(127.0.0.1:3306)/dahua_attendance?parseTime=true&charset=utf8mb4&loc=Local' \
+go run ./cmd/server
+```
+
+### 检查工程
 
 ```bash
 go test ./...
