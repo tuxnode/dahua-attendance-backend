@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -11,7 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/repository"
+	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/service"
 	transporthttp "github.com/tuxnode/dahua-attendance-backend/internal/transport/http"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 const (
@@ -21,6 +26,8 @@ const (
 	defaultWriteTimeout      = 5 * time.Second
 	defaultIdleTimeout       = 60 * time.Second
 	defaultShutdownTimeout   = 10 * time.Second
+	defaultDBDriver          = "mysql"
+	defaultDBConnectTimeout  = 5 * time.Second
 )
 
 func main() {
@@ -29,11 +36,14 @@ func main() {
 
 	addr := envString("HTTP_ADDR", defaultHTTPAddr)
 	shutdownTimeout := envDuration("HTTP_SHUTDOWN_TIMEOUT", defaultShutdownTimeout, logger)
+	dbConnectTimeout := envDuration("DB_CONNECT_TIMEOUT", defaultDBConnectTimeout, logger)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz)
 
-	consumer := transporthttp.NewLoggingConsumer(logger)
+	consumer, cleanup := buildConsumer(logger, dbConnectTimeout)
+	defer cleanup()
+
 	handler := transporthttp.NewHandler(
 		consumer,
 		transporthttp.WithLogger(logger),
@@ -83,6 +93,49 @@ func main() {
 	}
 
 	logger.Info("device HTTP server stopped")
+}
+
+func buildConsumer(logger *slog.Logger, connectTimeout time.Duration) (transporthttp.EventConsumer, func()) {
+	dsn := os.Getenv("DB_DSN")
+	if dsn == "" {
+		logger.Warn("database is not configured, fallback to logging consumer")
+		return transporthttp.NewLoggingConsumer(logger), func() {}
+	}
+
+	driver := envString("DB_DRIVER", defaultDBDriver)
+	db, err := sql.Open(driver, dsn)
+	if err != nil {
+		logger.Error("open database failed", "driver", driver, "error", err)
+		os.Exit(1)
+	}
+
+	db.SetMaxOpenConns(int(envInt64("DB_MAX_OPEN_CONNS", 10, logger)))
+	db.SetMaxIdleConns(int(envInt64("DB_MAX_IDLE_CONNS", 5, logger)))
+	db.SetConnMaxLifetime(envDuration("DB_CONN_MAX_LIFETIME", 30*time.Minute, logger))
+
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		logger.Error("ping database failed", "driver", driver, "error", err)
+		os.Exit(1)
+	}
+
+	store, err := repository.NewSQLRepository(db)
+	if err != nil {
+		_ = db.Close()
+		logger.Error("create sql repository failed", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("database repository enabled", "driver", driver)
+
+	return service.New(store, service.WithLogger(logger)), func() {
+		if err := db.Close(); err != nil {
+			logger.Warn("close database failed", "error", err)
+		}
+	}
 }
 
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
