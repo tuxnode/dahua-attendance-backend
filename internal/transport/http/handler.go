@@ -93,7 +93,7 @@ func (h *Handler) HandleDeviceEvents(w http.ResponseWriter, r *http.Request) {
 			"content_encoding", r.Header.Get("Content-Encoding"),
 			"error", err,
 		)
-		http.Error(w, "bad request", http.StatusBadRequest)
+		writeDeviceSuccess(w)
 		return
 	}
 

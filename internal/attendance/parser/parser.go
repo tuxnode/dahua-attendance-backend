@@ -89,30 +89,43 @@ func decodeBody(raw []byte, contentEncoding string) ([]byte, error) {
 }
 
 func decodeDeflate(data []byte) ([]byte, error) {
+	var decodeErrors []error
+
 	zlibReader, zlibErr := zlib.NewReader(bytes.NewReader(data))
 	if zlibErr == nil {
 		defer zlibReader.Close()
 		decoded, err := io.ReadAll(zlibReader)
-		if err == nil {
+		if err == nil && looksLikePayload(decoded) {
 			return decoded, nil
 		}
-		zlibErr = err
+		if err != nil {
+			decodeErrors = append(decodeErrors, fmt.Errorf("zlib: %w", err))
+		} else {
+			decodeErrors = append(decodeErrors, errors.New("zlib: decoded payload is not json or multipart"))
+		}
+	} else {
+		decodeErrors = append(decodeErrors, fmt.Errorf("zlib: %w", zlibErr))
 	}
 
 	flateReader := flate.NewReader(bytes.NewReader(data))
 	defer flateReader.Close()
 
 	decoded, flateErr := io.ReadAll(flateReader)
-	if flateErr == nil {
+	if flateErr == nil && looksLikePayload(decoded) {
 		return decoded, nil
+	}
+	if flateErr != nil {
+		decodeErrors = append(decodeErrors, fmt.Errorf("raw deflate: %w", flateErr))
+	} else {
+		decodeErrors = append(decodeErrors, errors.New("raw deflate: decoded payload is not json or multipart"))
 	}
 
 	// Some device captures advertise deflate while the body is already plain.
-	if looksLikeJSON(data) || looksLikeMultipart(data) {
+	if looksLikePayload(data) {
 		return data, nil
 	}
 
-	return nil, fmt.Errorf("parser: decode deflate: zlib: %v; raw deflate: %v", zlibErr, flateErr)
+	return nil, fmt.Errorf("parser: decode deflate: %v", errors.Join(decodeErrors...))
 }
 
 func decodeGzip(data []byte) ([]byte, error) {
@@ -297,12 +310,17 @@ func imageContentType(mediaType string) string {
 
 func looksLikeJSON(data []byte) bool {
 	trimmed := bytes.TrimSpace(data)
+	trimmed = bytes.TrimPrefix(trimmed, []byte{0xef, 0xbb, 0xbf})
 	return bytes.HasPrefix(trimmed, []byte("{")) || bytes.HasPrefix(trimmed, []byte("["))
 }
 
 func looksLikeMultipart(data []byte) bool {
 	trimmed := bytes.TrimSpace(data)
 	return bytes.HasPrefix(trimmed, []byte("--"))
+}
+
+func looksLikePayload(data []byte) bool {
+	return looksLikeJSON(data) || looksLikeMultipart(data)
 }
 
 func looksLikeJPEG(data []byte) bool {

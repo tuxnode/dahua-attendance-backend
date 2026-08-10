@@ -21,9 +21,11 @@ import (
 type fakeConsumer struct {
 	payload *parser.ParsedPayload
 	err     error
+	calls   int
 }
 
 func (c *fakeConsumer) HandleDevicePayload(_ context.Context, payload *parser.ParsedPayload) error {
+	c.calls++
 	c.payload = payload
 	return c.err
 }
@@ -105,8 +107,9 @@ func TestHandleDeviceEventsRejectsUnknownPath(t *testing.T) {
 	}
 }
 
-func TestHandleDeviceEventsRejectsInvalidPayload(t *testing.T) {
-	handler := transporthttp.NewHandler(nil, transporthttp.WithLogger(discardLogger()))
+func TestHandleDeviceEventsAcksInvalidPayloadWithoutConsumer(t *testing.T) {
+	consumer := &fakeConsumer{}
+	handler := transporthttp.NewHandler(consumer, transporthttp.WithLogger(discardLogger()))
 
 	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Code": "Unknown", "Data": {}}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -114,13 +117,15 @@ func TestHandleDeviceEventsRejectsInvalidPayload(t *testing.T) {
 
 	handler.HandleDeviceEvents(response, request)
 
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("unexpected status: %d", response.Code)
+	assertSuccessResponse(t, response)
+	if consumer.calls != 0 {
+		t.Fatalf("consumer should not be called, calls: %d", consumer.calls)
 	}
 }
 
-func TestHandleDeviceEventsRejectsOversizedPayload(t *testing.T) {
-	handler := transporthttp.NewHandler(nil, transporthttp.WithLogger(discardLogger()), transporthttp.WithMaxBodyBytes(8))
+func TestHandleDeviceEventsAcksOversizedPayloadWithoutConsumer(t *testing.T) {
+	consumer := &fakeConsumer{}
+	handler := transporthttp.NewHandler(consumer, transporthttp.WithLogger(discardLogger()), transporthttp.WithMaxBodyBytes(8))
 
 	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(doorStatusPayload()))
 	request.Header.Set("Content-Type", "application/json")
@@ -128,8 +133,9 @@ func TestHandleDeviceEventsRejectsOversizedPayload(t *testing.T) {
 
 	handler.HandleDeviceEvents(response, request)
 
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("unexpected status: %d", response.Code)
+	assertSuccessResponse(t, response)
+	if consumer.calls != 0 {
+		t.Fatalf("consumer should not be called, calls: %d", consumer.calls)
 	}
 }
 
