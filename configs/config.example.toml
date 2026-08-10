@@ -1,0 +1,24 @@
+[app]
+name = "dahua-attendance-backend"
+env = "dev"
+
+[http]
+addr = ":8080"
+max_body_bytes = 10485760
+read_header_timeout = "5s"
+read_timeout = "15s"
+write_timeout = "5s"
+idle_timeout = "60s"
+shutdown_timeout = "10s"
+
+[database]
+driver = "mysql"
+dsn = "user:password@tcp(127.0.0.1:3306)/dahua_attendance?parseTime=true&charset=utf8mb4&loc=Local"
+max_open_conns = 10
+max_idle_conns = 5
+conn_max_lifetime = "30m"
+connect_timeout = "5s"
+
+[log]
+level = "info"
+file_path = ""

@@ -4,60 +4,57 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"flag"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
-	"time"
 
 	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/repository"
 	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/service"
+	"github.com/tuxnode/dahua-attendance-backend/internal/config"
 	transporthttp "github.com/tuxnode/dahua-attendance-backend/internal/transport/http"
 
 	_ "github.com/go-sql-driver/mysql"
 )
 
-const (
-	defaultHTTPAddr          = ":8080"
-	defaultReadHeaderTimeout = 5 * time.Second
-	defaultReadTimeout       = 15 * time.Second
-	defaultWriteTimeout      = 5 * time.Second
-	defaultIdleTimeout       = 60 * time.Second
-	defaultShutdownTimeout   = 10 * time.Second
-	defaultDBDriver          = "mysql"
-	defaultDBConnectTimeout  = 5 * time.Second
-)
-
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	slog.SetDefault(logger)
+	configPath := flag.String("config", "", "path to TOML config file")
+	flag.Parse()
 
-	addr := envString("HTTP_ADDR", defaultHTTPAddr)
-	shutdownTimeout := envDuration("HTTP_SHUTDOWN_TIMEOUT", defaultShutdownTimeout, logger)
-	dbConnectTimeout := envDuration("DB_CONNECT_TIMEOUT", defaultDBConnectTimeout, logger)
+	cfg, err := config.Init(*configPath)
+	if err != nil {
+		bootstrapLogger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+		bootstrapLogger.Error("load config failed", "error", err)
+		os.Exit(1)
+	}
+
+	logger, closeLogger := buildLogger(cfg.Log)
+	defer closeLogger()
+	slog.SetDefault(logger)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz)
 
-	consumer, cleanup := buildConsumer(logger, dbConnectTimeout)
+	consumer, cleanup := buildConsumer(cfg.Database, logger)
 	defer cleanup()
 
 	handler := transporthttp.NewHandler(
 		consumer,
 		transporthttp.WithLogger(logger),
-		transporthttp.WithMaxBodyBytes(envInt64("HTTP_MAX_BODY_BYTES", transporthttp.DefaultMaxBodyBytes, logger)),
+		transporthttp.WithMaxBodyBytes(cfg.HTTP.MaxBodyBytes),
 	)
 	handler.RegisterRoutes(mux)
 
 	server := &http.Server{
-		Addr:              addr,
+		Addr:              cfg.HTTP.Addr,
 		Handler:           mux,
-		ReadHeaderTimeout: envDuration("HTTP_READ_HEADER_TIMEOUT", defaultReadHeaderTimeout, logger),
-		ReadTimeout:       envDuration("HTTP_READ_TIMEOUT", defaultReadTimeout, logger),
-		WriteTimeout:      envDuration("HTTP_WRITE_TIMEOUT", defaultWriteTimeout, logger),
-		IdleTimeout:       envDuration("HTTP_IDLE_TIMEOUT", defaultIdleTimeout, logger),
+		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout.Std(),
+		ReadTimeout:       cfg.HTTP.ReadTimeout.Std(),
+		WriteTimeout:      cfg.HTTP.WriteTimeout.Std(),
+		IdleTimeout:       cfg.HTTP.IdleTimeout.Std(),
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -67,7 +64,9 @@ func main() {
 	go func() {
 		logger.Info(
 			"device HTTP server started",
-			"addr", addr,
+			"app", cfg.App.Name,
+			"env", cfg.App.Env,
+			"addr", cfg.HTTP.Addr,
 			"paths", []string{transporthttp.DefaultPath, transporthttp.DeviceEventsPath},
 			"health_path", "/healthz",
 		)
@@ -84,7 +83,7 @@ func main() {
 		logger.Info("shutdown signal received")
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTP.ShutdownTimeout.Std())
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
@@ -95,30 +94,23 @@ func main() {
 	logger.Info("device HTTP server stopped")
 }
 
-func buildConsumer(logger *slog.Logger, connectTimeout time.Duration) (transporthttp.EventConsumer, func()) {
-	dsn := os.Getenv("DB_DSN")
-	if dsn == "" {
-		logger.Warn("database is not configured, fallback to logging consumer")
-		return transporthttp.NewLoggingConsumer(logger), func() {}
-	}
-
-	driver := envString("DB_DRIVER", defaultDBDriver)
-	db, err := sql.Open(driver, dsn)
+func buildConsumer(cfg config.DatabaseConfig, logger *slog.Logger) (transporthttp.EventConsumer, func()) {
+	db, err := sql.Open(cfg.Driver, cfg.DSN)
 	if err != nil {
-		logger.Error("open database failed", "driver", driver, "error", err)
+		logger.Error("open database failed", "driver", cfg.Driver, "error", err)
 		os.Exit(1)
 	}
 
-	db.SetMaxOpenConns(int(envInt64("DB_MAX_OPEN_CONNS", 10, logger)))
-	db.SetMaxIdleConns(int(envInt64("DB_MAX_IDLE_CONNS", 5, logger)))
-	db.SetConnMaxLifetime(envDuration("DB_CONN_MAX_LIFETIME", 30*time.Minute, logger))
+	db.SetMaxOpenConns(cfg.MaxOpenConns)
+	db.SetMaxIdleConns(cfg.MaxIdleConns)
+	db.SetConnMaxLifetime(cfg.ConnMaxLifetime.Std())
 
-	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.ConnectTimeout.Std())
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		logger.Error("ping database failed", "driver", driver, "error", err)
+		logger.Error("ping database failed", "driver", cfg.Driver, "error", err)
 		os.Exit(1)
 	}
 
@@ -129,7 +121,7 @@ func buildConsumer(logger *slog.Logger, connectTimeout time.Duration) (transport
 		os.Exit(1)
 	}
 
-	logger.Info("database repository enabled", "driver", driver)
+	logger.Info("database repository enabled", "driver", cfg.Driver)
 
 	return service.New(store, service.WithLogger(logger)), func() {
 		if err := db.Close(); err != nil {
@@ -138,46 +130,39 @@ func buildConsumer(logger *slog.Logger, connectTimeout time.Duration) (transport
 	}
 }
 
+func buildLogger(cfg config.LogConfig) (*slog.Logger, func()) {
+	level := slog.LevelInfo
+	switch cfg.Level {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
+
+	output := io.Writer(os.Stdout)
+	cleanup := func() {}
+	if cfg.FilePath != "" {
+		file, err := os.OpenFile(cfg.FilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			bootstrapLogger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+			bootstrapLogger.Error("open log file failed", "path", cfg.FilePath, "error", err)
+			os.Exit(1)
+		}
+		output = file
+		cleanup = func() {
+			if err := file.Close(); err != nil {
+				_, _ = os.Stderr.WriteString("close log file failed: " + err.Error() + "\n")
+			}
+		}
+	}
+
+	return slog.New(slog.NewJSONHandler(output, &slog.HandlerOptions{Level: level})), cleanup
+}
+
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok\n"))
-}
-
-func envString(key string, fallback string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-func envDuration(key string, fallback time.Duration, logger *slog.Logger) time.Duration {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-
-	duration, err := time.ParseDuration(value)
-	if err != nil {
-		logger.Warn("invalid duration env, fallback is used", "key", key, "value", value, "fallback", fallback.String(), "error", err)
-		return fallback
-	}
-
-	return duration
-}
-
-func envInt64(key string, fallback int64, logger *slog.Logger) int64 {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-
-	parsed, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || parsed <= 0 {
-		logger.Warn("invalid int env, fallback is used", "key", key, "value", value, "fallback", fallback, "error", err)
-		return fallback
-	}
-
-	return parsed
 }
