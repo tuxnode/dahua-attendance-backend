@@ -78,6 +78,7 @@ func main() {
 				transporthttp.DefaultPath,
 				transporthttp.DeviceEventsPath,
 				transporthttp.AttendanceRecordsPath,
+				transporthttp.DailyAttendancePath,
 			},
 			"health_path", "/healthz",
 		)

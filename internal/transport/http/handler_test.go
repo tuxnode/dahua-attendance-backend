@@ -23,11 +23,15 @@ import (
 type fakeService struct {
 	payload           *parser.ParsedPayload
 	records           []domain.AttendanceRecord
+	dailyRecords      []domain.DailyAttendance
 	query             domain.AttendanceRecordQuery
+	dailyQuery        domain.DailyAttendanceQuery
 	handleErr         error
 	listErr           error
+	listDailyErr      error
 	handleDeviceCalls int
 	listRecordsCalls  int
+	listDailyCalls    int
 }
 
 func (s *fakeService) HandleDevicePayload(_ context.Context, payload *parser.ParsedPayload) error {
@@ -43,6 +47,15 @@ func (s *fakeService) ListAttendanceRecords(_ context.Context, query domain.Atte
 		return nil, s.listErr
 	}
 	return append([]domain.AttendanceRecord(nil), s.records...), nil
+}
+
+func (s *fakeService) ListDailyAttendance(_ context.Context, query domain.DailyAttendanceQuery) ([]domain.DailyAttendance, error) {
+	s.listDailyCalls++
+	s.dailyQuery = query
+	if s.listDailyErr != nil {
+		return nil, s.listDailyErr
+	}
+	return append([]domain.DailyAttendance(nil), s.dailyRecords...), nil
 }
 
 func TestHandleDeviceEventsAcceptsRootJSON(t *testing.T) {
@@ -255,6 +268,133 @@ func TestHandleAttendanceRecordsReturnsServerErrorWhenServiceFails(t *testing.T)
 	router := newTestRouter(&fakeService{listErr: errors.New("query failed")})
 
 	request := httptest.NewRequest(http.MethodGet, transporthttp.AttendanceRecordsPath, nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("unexpected status: %d", response.Code)
+	}
+}
+
+func TestHandleDailyAttendanceReturnsRecords(t *testing.T) {
+	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.Local)
+	service := &fakeService{
+		dailyRecords: []domain.DailyAttendance{
+			{
+				Date:               date,
+				UserID:             "REDACTED_USER_ID",
+				UserName:           "REDACTED_NAME",
+				DeviceSN:           "REDACTED_DEVICE_SN",
+				Status:             domain.DailyAttendanceStatusLateAndEarlyLeave,
+				Exceptions:         []domain.DailyAttendanceException{domain.DailyAttendanceExceptionLate, domain.DailyAttendanceExceptionEarlyLeave},
+				WorkStartAt:        date.Add(9 * time.Hour),
+				WorkEndAt:          date.Add(18 * time.Hour),
+				FirstEntryAt:       date.Add(9*time.Hour + 10*time.Minute),
+				LastExitAt:         date.Add(17*time.Hour + 30*time.Minute),
+				LateDuration:       10 * time.Minute,
+				EarlyLeaveDuration: 30 * time.Minute,
+				RecordCount:        2,
+				SnapshotCount:      1,
+			},
+		},
+	}
+	router := newTestRouter(service)
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.DailyAttendancePath+"?user_id=REDACTED_USER_ID&device_sn=REDACTED_DEVICE_SN&date=2026-08-10&limit=20&offset=40", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.dailyQuery.UserID != "REDACTED_USER_ID" {
+		t.Fatalf("unexpected user id filter: %s", service.dailyQuery.UserID)
+	}
+	if service.dailyQuery.DeviceSN != "REDACTED_DEVICE_SN" {
+		t.Fatalf("unexpected device sn filter: %s", service.dailyQuery.DeviceSN)
+	}
+	if service.dailyQuery.StartDate.Format("2006-01-02") != "2026-08-10" {
+		t.Fatalf("unexpected start date: %s", service.dailyQuery.StartDate)
+	}
+	if service.dailyQuery.EndDate.Format("2006-01-02") != "2026-08-10" {
+		t.Fatalf("unexpected end date: %s", service.dailyQuery.EndDate)
+	}
+	if service.dailyQuery.Limit != 20 {
+		t.Fatalf("unexpected limit: %d", service.dailyQuery.Limit)
+	}
+	if service.dailyQuery.Offset != 40 {
+		t.Fatalf("unexpected offset: %d", service.dailyQuery.Offset)
+	}
+
+	body := response.Body.String()
+	for _, expected := range []string{
+		`"date":"2026-08-10"`,
+		`"status":"late_and_early_leave"`,
+		`"exceptions":["late","early_leave"]`,
+		`"is_abnormal":true`,
+		`"late_seconds":600`,
+		`"early_leave_seconds":1800`,
+		`"record_count":2`,
+		`"snapshot_count":1`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("response missing %s: %s", expected, body)
+		}
+	}
+}
+
+func TestHandleDailyAttendanceAcceptsDateRange(t *testing.T) {
+	service := &fakeService{}
+	router := newTestRouter(service)
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.DailyAttendancePath+"?start_date=2026-08-01&end_date=2026-08-10", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.dailyQuery.StartDate.Format("2006-01-02") != "2026-08-01" {
+		t.Fatalf("unexpected start date: %s", service.dailyQuery.StartDate)
+	}
+	if service.dailyQuery.EndDate.Format("2006-01-02") != "2026-08-10" {
+		t.Fatalf("unexpected end date: %s", service.dailyQuery.EndDate)
+	}
+}
+
+func TestHandleDailyAttendanceRejectsInvalidDate(t *testing.T) {
+	router := newTestRouter(&fakeService{})
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.DailyAttendancePath+"?date=2026/08/10", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d", response.Code)
+	}
+}
+
+func TestHandleDailyAttendanceRejectsMixedDateAndRange(t *testing.T) {
+	router := newTestRouter(&fakeService{})
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.DailyAttendancePath+"?date=2026-08-10&start_date=2026-08-01", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d", response.Code)
+	}
+}
+
+func TestHandleDailyAttendanceReturnsServerErrorWhenServiceFails(t *testing.T) {
+	router := newTestRouter(&fakeService{listDailyErr: errors.New("query failed")})
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.DailyAttendancePath, nil)
 	response := httptest.NewRecorder()
 
 	router.ServeHTTP(response, request)

@@ -127,10 +127,11 @@ go test ./...
 - `POST /`：设备默认上报入口
 - `POST /api/v1/device/events`：设备上报入口
 - `GET /api/v1/attendance/records`：前端查询考勤记录
+- `GET /api/v1/attendance/daily`：前端查询考勤日报
 
 设备上报请求会被解析为 `AccessControl` 或 `DoorStatus` 事件，并分别写入 `attendance_records` 和 `door_status_records`。
 
-考勤记录查询支持以下查询参数：
+考勤记录查询 `GET /api/v1/attendance/records` 支持以下查询参数：
 
 ```text
 user_id
@@ -140,6 +141,20 @@ end_time
 limit
 offset
 ```
+
+考勤日报查询 `GET /api/v1/attendance/daily` 支持以下查询参数：
+
+```text
+user_id
+device_sn
+date
+start_date
+end_date
+limit
+offset
+```
+
+`date`、`start_date` 和 `end_date` 使用 `YYYY-MM-DD` 格式。传入 `date` 时查询单日；传入 `start_date` 和 `end_date` 时查询日期范围。
 
 ## 设备协议
 

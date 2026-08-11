@@ -21,6 +21,9 @@ const (
 	DefaultPath           = "/"
 	DeviceEventsPath      = "/api/v1/device/events"
 	AttendanceRecordsPath = "/api/v1/attendance/records"
+	DailyAttendancePath   = "/api/v1/attendance/daily"
+
+	queryDateLayout = "2006-01-02"
 )
 
 type EventConsumer interface {
@@ -31,9 +34,14 @@ type AttendanceQueryService interface {
 	ListAttendanceRecords(ctx context.Context, query domain.AttendanceRecordQuery) ([]domain.AttendanceRecord, error)
 }
 
+type DailyAttendanceQueryService interface {
+	ListDailyAttendance(ctx context.Context, query domain.DailyAttendanceQuery) ([]domain.DailyAttendance, error)
+}
+
 type AttendanceService interface {
 	EventConsumer
 	AttendanceQueryService
+	DailyAttendanceQueryService
 }
 
 type Handler struct {
@@ -70,6 +78,7 @@ func NewRouter(service AttendanceService, opts ...Option) *gin.Engine {
 	router.POST(DefaultPath, handler.HandleDeviceEvents)
 	router.POST(DeviceEventsPath, handler.HandleDeviceEvents)
 	router.GET(AttendanceRecordsPath, handler.HandleAttendanceRecords)
+	router.GET(DailyAttendancePath, handler.HandleDailyAttendance)
 
 	return router
 }
@@ -165,6 +174,29 @@ func (h *Handler) HandleAttendanceRecords(c *gin.Context) {
 	})
 }
 
+func (h *Handler) HandleDailyAttendance(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	query, err := parseDailyAttendanceQuery(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	records, err := h.service.ListDailyAttendance(c.Request.Context(), query)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "failed to list daily attendance")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.ListDailyAttendanceResponse{
+		Records: toDailyAttendanceDTOs(records),
+	})
+}
+
 func writeDeviceSuccess(c *gin.Context) {
 	c.JSON(http.StatusOK, domain.Response{
 		Code:    0,
@@ -211,6 +243,58 @@ func parseAttendanceRecordQuery(c *gin.Context) (domain.AttendanceRecordQuery, e
 	}, nil
 }
 
+func parseDailyAttendanceQuery(c *gin.Context) (domain.DailyAttendanceQuery, error) {
+	dateValue := strings.TrimSpace(c.Query("date"))
+	startDateValue := strings.TrimSpace(c.Query("start_date"))
+	endDateValue := strings.TrimSpace(c.Query("end_date"))
+
+	var startDate time.Time
+	var endDate time.Time
+	var err error
+
+	if dateValue != "" {
+		if startDateValue != "" || endDateValue != "" {
+			return domain.DailyAttendanceQuery{}, errors.New("date cannot be combined with start_date or end_date")
+		}
+
+		startDate, err = parseDateValue("date", dateValue)
+		if err != nil {
+			return domain.DailyAttendanceQuery{}, err
+		}
+		endDate = startDate
+	} else {
+		startDate, err = parseDateQuery(c, "start_date")
+		if err != nil {
+			return domain.DailyAttendanceQuery{}, err
+		}
+		endDate, err = parseDateQuery(c, "end_date")
+		if err != nil {
+			return domain.DailyAttendanceQuery{}, err
+		}
+		if !startDate.IsZero() && !endDate.IsZero() && endDate.Before(startDate) {
+			return domain.DailyAttendanceQuery{}, errors.New("end_date must not be before start_date")
+		}
+	}
+
+	limit, err := parseIntQuery(c, "limit")
+	if err != nil {
+		return domain.DailyAttendanceQuery{}, err
+	}
+	offset, err := parseIntQuery(c, "offset")
+	if err != nil {
+		return domain.DailyAttendanceQuery{}, err
+	}
+
+	return domain.DailyAttendanceQuery{
+		UserID:    strings.TrimSpace(c.Query("user_id")),
+		DeviceSN:  strings.TrimSpace(c.Query("device_sn")),
+		StartDate: startDate,
+		EndDate:   endDate,
+		Limit:     limit,
+		Offset:    offset,
+	}, nil
+}
+
 func parseUnixQuery(c *gin.Context, key string) (time.Time, error) {
 	value := strings.TrimSpace(c.Query(key))
 	if value == "" {
@@ -223,6 +307,24 @@ func parseUnixQuery(c *gin.Context, key string) (time.Time, error) {
 	}
 
 	return time.Unix(parsed, 0), nil
+}
+
+func parseDateQuery(c *gin.Context, key string) (time.Time, error) {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return time.Time{}, nil
+	}
+
+	return parseDateValue(key, value)
+}
+
+func parseDateValue(key string, value string) (time.Time, error) {
+	parsed, err := time.ParseInLocation(queryDateLayout, value, time.Local)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s must use YYYY-MM-DD format", key)
+	}
+
+	return parsed, nil
 }
 
 func parseIntQuery(c *gin.Context, key string) (int, error) {
@@ -262,6 +364,44 @@ func toAttendanceRecordDTO(record domain.AttendanceRecord) attendancev1.Attendan
 		HasSnapshot:   record.ImageCount > 0,
 		SnapshotCount: record.ImageCount,
 	}
+}
+
+func toDailyAttendanceDTOs(records []domain.DailyAttendance) []attendancev1.DailyAttendanceDTO {
+	dtos := make([]attendancev1.DailyAttendanceDTO, 0, len(records))
+	for _, record := range records {
+		dtos = append(dtos, toDailyAttendanceDTO(record))
+	}
+
+	return dtos
+}
+
+func toDailyAttendanceDTO(record domain.DailyAttendance) attendancev1.DailyAttendanceDTO {
+	return attendancev1.DailyAttendanceDTO{
+		Date:              record.Date.Format(queryDateLayout),
+		UserID:            record.UserID,
+		UserName:          record.UserName,
+		DeviceSN:          record.DeviceSN,
+		Status:            record.Status.String(),
+		Exceptions:        dailyAttendanceExceptions(record.Exceptions),
+		IsAbnormal:        record.IsAbnormal(),
+		WorkStartAt:       timeToUnixSeconds(record.WorkStartAt),
+		WorkEndAt:         timeToUnixSeconds(record.WorkEndAt),
+		FirstEntryAt:      timeToUnixSeconds(record.FirstEntryAt),
+		LastExitAt:        timeToUnixSeconds(record.LastExitAt),
+		LateSeconds:       int64(record.LateDuration.Seconds()),
+		EarlyLeaveSeconds: int64(record.EarlyLeaveDuration.Seconds()),
+		RecordCount:       record.RecordCount,
+		SnapshotCount:     record.SnapshotCount,
+	}
+}
+
+func dailyAttendanceExceptions(exceptions []domain.DailyAttendanceException) []string {
+	values := make([]string, 0, len(exceptions))
+	for _, exception := range exceptions {
+		values = append(values, exception.String())
+	}
+
+	return values
 }
 
 func timeToUnixSeconds(value time.Time) int64 {
