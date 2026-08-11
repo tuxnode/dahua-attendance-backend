@@ -242,6 +242,209 @@ func TestListAttendanceRecordsReturnsRepositoryError(t *testing.T) {
 	}
 }
 
+func TestListDailyAttendanceReturnsNormal(t *testing.T) {
+	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	repo := &fakeRepository{
+		attendanceRecords: []domain.AttendanceRecord{
+			dailyRecord(date.Add(8*time.Hour+50*time.Minute), domain.AccessDirectionEntry),
+			{
+				UserID:     "REDACTED_USER_ID",
+				CardName:   "REDACTED_NAME",
+				DeviceSN:   "REDACTED_DEVICE_SN",
+				Direction:  domain.AccessDirectionExit,
+				Status:     1,
+				EventTime:  date.Add(18*time.Hour + 10*time.Minute),
+				ImageCount: 1,
+			},
+		},
+	}
+	svc := service.New(repo, service.WithLogger(discardLogger()))
+
+	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
+		UserID:    "REDACTED_USER_ID",
+		StartDate: date,
+		EndDate:   date,
+	})
+	if err != nil {
+		t.Fatalf("list daily attendance: %v", err)
+	}
+	if len(dailies) != 1 {
+		t.Fatalf("unexpected daily attendance length: %d", len(dailies))
+	}
+
+	daily := dailies[0]
+	if daily.Status != domain.DailyAttendanceStatusNormal {
+		t.Fatalf("unexpected status: %s", daily.Status)
+	}
+	if !daily.FirstEntryAt.Equal(date.Add(8*time.Hour + 50*time.Minute)) {
+		t.Fatalf("unexpected first entry: %s", daily.FirstEntryAt)
+	}
+	if !daily.LastExitAt.Equal(date.Add(18*time.Hour + 10*time.Minute)) {
+		t.Fatalf("unexpected last exit: %s", daily.LastExitAt)
+	}
+	if daily.RecordCount != 2 {
+		t.Fatalf("unexpected record count: %d", daily.RecordCount)
+	}
+	if daily.SnapshotCount != 1 {
+		t.Fatalf("unexpected snapshot count: %d", daily.SnapshotCount)
+	}
+	if repo.query.StartTime != date {
+		t.Fatalf("unexpected repository start time: %s", repo.query.StartTime)
+	}
+	if !repo.query.EndTime.Equal(date.AddDate(0, 0, 1).Add(-time.Nanosecond)) {
+		t.Fatalf("unexpected repository end time: %s", repo.query.EndTime)
+	}
+}
+
+func TestListDailyAttendanceReturnsLateAndEarlyLeave(t *testing.T) {
+	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+	repo := &fakeRepository{
+		attendanceRecords: []domain.AttendanceRecord{
+			dailyRecord(date.Add(9*time.Hour+10*time.Minute), domain.AccessDirectionEntry),
+			dailyRecord(date.Add(17*time.Hour+30*time.Minute), domain.AccessDirectionExit),
+		},
+	}
+	svc := service.New(repo, service.WithLogger(discardLogger()))
+
+	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
+		UserID:    "REDACTED_USER_ID",
+		StartDate: date,
+		EndDate:   date,
+	})
+	if err != nil {
+		t.Fatalf("list daily attendance: %v", err)
+	}
+	if len(dailies) != 1 {
+		t.Fatalf("unexpected daily attendance length: %d", len(dailies))
+	}
+
+	daily := dailies[0]
+	if daily.Status != domain.DailyAttendanceStatusLateAndEarlyLeave {
+		t.Fatalf("unexpected status: %s", daily.Status)
+	}
+	if daily.LateDuration != 10*time.Minute {
+		t.Fatalf("unexpected late duration: %s", daily.LateDuration)
+	}
+	if daily.EarlyLeaveDuration != 30*time.Minute {
+		t.Fatalf("unexpected early leave duration: %s", daily.EarlyLeaveDuration)
+	}
+	if !daily.HasException(domain.DailyAttendanceExceptionLate) {
+		t.Fatal("expected late exception")
+	}
+	if !daily.HasException(domain.DailyAttendanceExceptionEarlyLeave) {
+		t.Fatal("expected early leave exception")
+	}
+}
+
+func TestListDailyAttendanceReturnsMissingCheckOut(t *testing.T) {
+	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+	repo := &fakeRepository{
+		attendanceRecords: []domain.AttendanceRecord{
+			dailyRecord(date.Add(8*time.Hour+55*time.Minute), domain.AccessDirectionEntry),
+		},
+	}
+	svc := service.New(repo, service.WithLogger(discardLogger()))
+
+	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
+		UserID:    "REDACTED_USER_ID",
+		StartDate: date,
+		EndDate:   date,
+	})
+	if err != nil {
+		t.Fatalf("list daily attendance: %v", err)
+	}
+	if len(dailies) != 1 {
+		t.Fatalf("unexpected daily attendance length: %d", len(dailies))
+	}
+	if dailies[0].Status != domain.DailyAttendanceStatusMissingCheckOut {
+		t.Fatalf("unexpected status: %s", dailies[0].Status)
+	}
+	if !dailies[0].HasException(domain.DailyAttendanceExceptionMissingCheckOut) {
+		t.Fatal("expected missing check-out exception")
+	}
+}
+
+func TestListDailyAttendanceReturnsAbsentForQueriedUser(t *testing.T) {
+	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+	svc := service.New(&fakeRepository{}, service.WithLogger(discardLogger()))
+
+	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
+		UserID:    "REDACTED_USER_ID",
+		StartDate: date,
+		EndDate:   date,
+	})
+	if err != nil {
+		t.Fatalf("list daily attendance: %v", err)
+	}
+	if len(dailies) != 1 {
+		t.Fatalf("unexpected daily attendance length: %d", len(dailies))
+	}
+	if dailies[0].Status != domain.DailyAttendanceStatusAbsent {
+		t.Fatalf("unexpected status: %s", dailies[0].Status)
+	}
+	if !dailies[0].HasException(domain.DailyAttendanceExceptionAbsent) {
+		t.Fatal("expected absent exception")
+	}
+}
+
+func TestListDailyAttendanceSkipsUserlessRecords(t *testing.T) {
+	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+	repo := &fakeRepository{
+		attendanceRecords: []domain.AttendanceRecord{
+			{
+				DeviceSN:  "REDACTED_DEVICE_SN",
+				Direction: domain.AccessDirectionEntry,
+				Status:    1,
+				EventTime: date.Add(9 * time.Hour),
+			},
+		},
+	}
+	svc := service.New(repo, service.WithLogger(discardLogger()))
+
+	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
+		StartDate: date,
+		EndDate:   date,
+	})
+	if err != nil {
+		t.Fatalf("list daily attendance: %v", err)
+	}
+	if len(dailies) != 0 {
+		t.Fatalf("expected no daily attendance, got %d", len(dailies))
+	}
+}
+
+func TestListDailyAttendanceRejectsInvalidQuery(t *testing.T) {
+	svc := service.New(&fakeRepository{}, service.WithLogger(discardLogger()))
+	start := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+
+	_, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
+		StartDate: start,
+		EndDate:   start.AddDate(0, 0, -1),
+	})
+	if err == nil {
+		t.Fatal("expected invalid date range error")
+	}
+
+	_, err = svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
+		StartDate: start,
+		EndDate:   start.AddDate(0, 0, 31),
+	})
+	if err == nil {
+		t.Fatal("expected oversized date range error")
+	}
+}
+
+func dailyRecord(eventTime time.Time, direction domain.AccessDirection) domain.AttendanceRecord {
+	return domain.AttendanceRecord{
+		UserID:    "REDACTED_USER_ID",
+		CardName:  "REDACTED_NAME",
+		DeviceSN:  "REDACTED_DEVICE_SN",
+		Direction: direction,
+		Status:    1,
+		EventTime: eventTime,
+	}
+}
+
 func accessControlEnvelope(t *testing.T) domain.EventEnvelope {
 	t.Helper()
 
