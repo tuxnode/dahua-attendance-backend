@@ -12,95 +12,107 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/domain"
 	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/parser"
 	transporthttp "github.com/tuxnode/dahua-attendance-backend/internal/transport/http"
 )
 
-type fakeConsumer struct {
-	payload *parser.ParsedPayload
-	err     error
-	calls   int
+type fakeService struct {
+	payload           *parser.ParsedPayload
+	records           []domain.AttendanceRecord
+	query             domain.AttendanceRecordQuery
+	handleErr         error
+	listErr           error
+	handleDeviceCalls int
+	listRecordsCalls  int
 }
 
-func (c *fakeConsumer) HandleDevicePayload(_ context.Context, payload *parser.ParsedPayload) error {
-	c.calls++
-	c.payload = payload
-	return c.err
+func (s *fakeService) HandleDevicePayload(_ context.Context, payload *parser.ParsedPayload) error {
+	s.handleDeviceCalls++
+	s.payload = payload
+	return s.handleErr
+}
+
+func (s *fakeService) ListAttendanceRecords(_ context.Context, query domain.AttendanceRecordQuery) ([]domain.AttendanceRecord, error) {
+	s.listRecordsCalls++
+	s.query = query
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	return append([]domain.AttendanceRecord(nil), s.records...), nil
 }
 
 func TestHandleDeviceEventsAcceptsRootJSON(t *testing.T) {
-	consumer := &fakeConsumer{}
-	handler := transporthttp.NewHandler(consumer, transporthttp.WithLogger(discardLogger()))
+	service := &fakeService{}
+	router := newTestRouter(service)
 
 	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(doorStatusPayload()))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 
-	handler.HandleDeviceEvents(response, request)
+	router.ServeHTTP(response, request)
 
 	assertSuccessResponse(t, response)
-	if consumer.payload == nil {
+	if service.payload == nil {
 		t.Fatal("consumer was not called")
 	}
-	if got := len(consumer.payload.Events); got != 1 {
+	if got := len(service.payload.Events); got != 1 {
 		t.Fatalf("unexpected events length: %d", got)
 	}
-	if consumer.payload.Events[0].Code != domain.EventCodeDoorStatus {
-		t.Fatalf("unexpected event code: %s", consumer.payload.Events[0].Code)
+	if service.payload.Events[0].Code != domain.EventCodeDoorStatus {
+		t.Fatalf("unexpected event code: %s", service.payload.Events[0].Code)
 	}
 }
 
 func TestHandleDeviceEventsAcceptsDeviceEventsPath(t *testing.T) {
-	handler := transporthttp.NewHandler(nil, transporthttp.WithLogger(discardLogger()))
+	router := newTestRouter(&fakeService{})
 
 	request := httptest.NewRequest(http.MethodPost, transporthttp.DeviceEventsPath, strings.NewReader(doorStatusPayload()))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 
-	handler.HandleDeviceEvents(response, request)
+	router.ServeHTTP(response, request)
 
 	assertSuccessResponse(t, response)
 }
 
 func TestHandleDeviceEventsAcceptsMultipartMixedReplace(t *testing.T) {
-	handler := transporthttp.NewHandler(nil, transporthttp.WithLogger(discardLogger()))
+	router := newTestRouter(&fakeService{})
 
 	contentType, body := multipartPayload(t)
 	request := httptest.NewRequest(http.MethodPost, "/", body)
 	request.Header.Set("Content-Type", contentType)
 	response := httptest.NewRecorder()
 
-	handler.HandleDeviceEvents(response, request)
+	router.ServeHTTP(response, request)
 
 	assertSuccessResponse(t, response)
 }
 
 func TestHandleDeviceEventsRejectsUnsupportedMethod(t *testing.T) {
-	handler := transporthttp.NewHandler(nil, transporthttp.WithLogger(discardLogger()))
+	router := newTestRouter(&fakeService{})
 
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	response := httptest.NewRecorder()
 
-	handler.HandleDeviceEvents(response, request)
+	router.ServeHTTP(response, request)
 
 	if response.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("unexpected status: %d", response.Code)
 	}
-	if response.Header().Get("Allow") != http.MethodPost {
-		t.Fatalf("unexpected allow header: %s", response.Header().Get("Allow"))
-	}
 }
 
 func TestHandleDeviceEventsRejectsUnknownPath(t *testing.T) {
-	handler := transporthttp.NewHandler(nil, transporthttp.WithLogger(discardLogger()))
+	router := newTestRouter(&fakeService{})
 
 	request := httptest.NewRequest(http.MethodPost, "/unknown", strings.NewReader(doorStatusPayload()))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 
-	handler.HandleDeviceEvents(response, request)
+	router.ServeHTTP(response, request)
 
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("unexpected status: %d", response.Code)
@@ -108,52 +120,152 @@ func TestHandleDeviceEventsRejectsUnknownPath(t *testing.T) {
 }
 
 func TestHandleDeviceEventsAcksInvalidPayloadWithoutConsumer(t *testing.T) {
-	consumer := &fakeConsumer{}
-	handler := transporthttp.NewHandler(consumer, transporthttp.WithLogger(discardLogger()))
+	service := &fakeService{}
+	router := newTestRouter(service)
 
 	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Code": "Unknown", "Data": {}}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 
-	handler.HandleDeviceEvents(response, request)
+	router.ServeHTTP(response, request)
 
 	assertSuccessResponse(t, response)
-	if consumer.calls != 0 {
-		t.Fatalf("consumer should not be called, calls: %d", consumer.calls)
+	if service.handleDeviceCalls != 0 {
+		t.Fatalf("consumer should not be called, calls: %d", service.handleDeviceCalls)
 	}
 }
 
 func TestHandleDeviceEventsAcksOversizedPayloadWithoutConsumer(t *testing.T) {
-	consumer := &fakeConsumer{}
-	handler := transporthttp.NewHandler(consumer, transporthttp.WithLogger(discardLogger()), transporthttp.WithMaxBodyBytes(8))
-
-	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(doorStatusPayload()))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-
-	handler.HandleDeviceEvents(response, request)
-
-	assertSuccessResponse(t, response)
-	if consumer.calls != 0 {
-		t.Fatalf("consumer should not be called, calls: %d", consumer.calls)
-	}
-}
-
-func TestHandleDeviceEventsReturnsServerErrorWhenConsumerFails(t *testing.T) {
-	handler := transporthttp.NewHandler(
-		&fakeConsumer{err: errors.New("store failed")},
+	service := &fakeService{}
+	router := transporthttp.NewRouter(
+		service,
 		transporthttp.WithLogger(discardLogger()),
+		transporthttp.WithMaxBodyBytes(8),
 	)
 
 	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(doorStatusPayload()))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 
-	handler.HandleDeviceEvents(response, request)
+	router.ServeHTTP(response, request)
+
+	assertSuccessResponse(t, response)
+	if service.handleDeviceCalls != 0 {
+		t.Fatalf("consumer should not be called, calls: %d", service.handleDeviceCalls)
+	}
+}
+
+func TestHandleDeviceEventsReturnsServerErrorWhenConsumerFails(t *testing.T) {
+	router := newTestRouter(&fakeService{handleErr: errors.New("store failed")})
+
+	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(doorStatusPayload()))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
 
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("unexpected status: %d", response.Code)
 	}
+}
+
+func TestHandleHealthz(t *testing.T) {
+	router := newTestRouter(&fakeService{})
+
+	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d", response.Code)
+	}
+	if response.Body.String() != "ok\n" {
+		t.Fatalf("unexpected body: %q", response.Body.String())
+	}
+}
+
+func TestHandleAttendanceRecordsReturnsRecords(t *testing.T) {
+	service := &fakeService{
+		records: []domain.AttendanceRecord{
+			{
+				DeviceSN:   "REDACTED_DEVICE_SN",
+				UserID:     "REDACTED_USER_ID",
+				CardName:   "REDACTED_NAME",
+				Method:     domain.AccessMethodFaceOpen,
+				Direction:  domain.AccessDirectionEntry,
+				Status:     1,
+				EventTime:  time.Unix(1700000000, 0),
+				ReceivedAt: time.Unix(1700000100, 0),
+				ImageCount: 1,
+				RawEvent:   []byte(`{"sensitive":true}`),
+			},
+		},
+	}
+	router := newTestRouter(service)
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.AttendanceRecordsPath+"?user_id=REDACTED_USER_ID&device_sn=REDACTED_DEVICE_SN&start_time=1700000000&end_time=1700000200&limit=20&offset=40", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.query.UserID != "REDACTED_USER_ID" {
+		t.Fatalf("unexpected user id filter: %s", service.query.UserID)
+	}
+	if service.query.DeviceSN != "REDACTED_DEVICE_SN" {
+		t.Fatalf("unexpected device sn filter: %s", service.query.DeviceSN)
+	}
+	if service.query.StartTime.Unix() != 1700000000 {
+		t.Fatalf("unexpected start time: %s", service.query.StartTime)
+	}
+	if service.query.EndTime.Unix() != 1700000200 {
+		t.Fatalf("unexpected end time: %s", service.query.EndTime)
+	}
+	if service.query.Limit != 20 {
+		t.Fatalf("unexpected limit: %d", service.query.Limit)
+	}
+	if service.query.Offset != 40 {
+		t.Fatalf("unexpected offset: %d", service.query.Offset)
+	}
+	if strings.Contains(response.Body.String(), "RawEvent") || strings.Contains(response.Body.String(), "sensitive") {
+		t.Fatalf("response exposes raw event: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"method_name":"face_open"`) {
+		t.Fatalf("unexpected response body: %s", response.Body.String())
+	}
+}
+
+func TestHandleAttendanceRecordsRejectsInvalidTimeRange(t *testing.T) {
+	router := newTestRouter(&fakeService{})
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.AttendanceRecordsPath+"?start_time=1700000200&end_time=1700000000", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d", response.Code)
+	}
+}
+
+func TestHandleAttendanceRecordsReturnsServerErrorWhenServiceFails(t *testing.T) {
+	router := newTestRouter(&fakeService{listErr: errors.New("query failed")})
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.AttendanceRecordsPath, nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("unexpected status: %d", response.Code)
+	}
+}
+
+func newTestRouter(service *fakeService) *gin.Engine {
+	return transporthttp.NewRouter(service, transporthttp.WithLogger(discardLogger()))
 }
 
 func assertSuccessResponse(t *testing.T, response *httptest.ResponseRecorder) {

@@ -2,37 +2,51 @@ package transporthttp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	attendancev1 "github.com/tuxnode/dahua-attendance-backend/api/attendance/v1"
 	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/domain"
 	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/parser"
 )
 
 const (
-	DefaultMaxBodyBytes = 8 << 20
-	DefaultPath         = "/"
-	DeviceEventsPath    = "/api/v1/device/events"
+	DefaultMaxBodyBytes   = 8 << 20
+	DefaultPath           = "/"
+	DeviceEventsPath      = "/api/v1/device/events"
+	AttendanceRecordsPath = "/api/v1/attendance/records"
 )
 
 type EventConsumer interface {
 	HandleDevicePayload(ctx context.Context, payload *parser.ParsedPayload) error
 }
 
+type AttendanceQueryService interface {
+	ListAttendanceRecords(ctx context.Context, query domain.AttendanceRecordQuery) ([]domain.AttendanceRecord, error)
+}
+
+type AttendanceService interface {
+	EventConsumer
+	AttendanceQueryService
+}
+
 type Handler struct {
-	consumer     EventConsumer
+	service      AttendanceService
 	logger       *slog.Logger
 	maxBodyBytes int64
 }
 
 type Option func(*Handler)
 
-func NewHandler(consumer EventConsumer, opts ...Option) *Handler {
+func NewHandler(service AttendanceService, opts ...Option) *Handler {
 	handler := &Handler{
-		consumer:     consumer,
+		service:      service,
 		logger:       slog.Default(),
 		maxBodyBytes: DefaultMaxBodyBytes,
 	}
@@ -42,6 +56,22 @@ func NewHandler(consumer EventConsumer, opts ...Option) *Handler {
 	}
 
 	return handler
+}
+
+func NewRouter(service AttendanceService, opts ...Option) *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+
+	handler := NewHandler(service, opts...)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.HandleMethodNotAllowed = true
+
+	router.GET("/healthz", handler.HandleHealthz)
+	router.POST(DefaultPath, handler.HandleDeviceEvents)
+	router.POST(DeviceEventsPath, handler.HandleDeviceEvents)
+	router.GET(AttendanceRecordsPath, handler.HandleAttendanceRecords)
+
+	return router
 }
 
 func WithLogger(logger *slog.Logger) Option {
@@ -60,77 +90,186 @@ func WithMaxBodyBytes(maxBodyBytes int64) Option {
 	}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc(DefaultPath, h.HandleDeviceEvents)
-	mux.HandleFunc(DeviceEventsPath, h.HandleDeviceEvents)
+func (h *Handler) HandleHealthz(c *gin.Context) {
+	c.String(http.StatusOK, "ok\n")
 }
 
-func (h *Handler) HandleDeviceEvents(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != DefaultPath && r.URL.Path != DeviceEventsPath {
-		http.NotFound(w, r)
-		return
-	}
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	body := http.MaxBytesReader(w, r.Body, h.maxBodyBytes)
+func (h *Handler) HandleDeviceEvents(c *gin.Context) {
+	body := http.MaxBytesReader(c.Writer, c.Request.Body, h.maxBodyBytes)
 	defer body.Close()
 
 	payload, err := parser.Parse(
-		r.Header.Get("Content-Type"),
-		r.Header.Get("Content-Encoding"),
+		c.GetHeader("Content-Type"),
+		c.GetHeader("Content-Encoding"),
 		body,
 	)
 	if err != nil {
 		h.logger.WarnContext(
-			r.Context(),
+			c.Request.Context(),
 			"failed to parse device payload",
-			"remote_addr", r.RemoteAddr,
-			"content_type", r.Header.Get("Content-Type"),
-			"content_encoding", r.Header.Get("Content-Encoding"),
+			"remote_addr", c.Request.RemoteAddr,
+			"content_type", c.GetHeader("Content-Type"),
+			"content_encoding", c.GetHeader("Content-Encoding"),
 			"error", err,
 		)
-		writeDeviceSuccess(w)
+		writeDeviceSuccess(c)
 		return
 	}
 
-	if h.consumer != nil {
-		if err := h.consumer.HandleDevicePayload(r.Context(), payload); err != nil {
+	if h.service != nil {
+		if err := h.service.HandleDevicePayload(c.Request.Context(), payload); err != nil {
 			h.logger.ErrorContext(
-				r.Context(),
+				c.Request.Context(),
 				"failed to handle device payload",
-				"remote_addr", r.RemoteAddr,
+				"remote_addr", c.Request.RemoteAddr,
 				"events", len(payload.Events),
 				"images", len(payload.Images),
 				"error", err,
 			)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			writeError(c, http.StatusInternalServerError, "internal_server_error", "failed to handle device payload")
 			return
 		}
 	}
 
 	h.logger.InfoContext(
-		r.Context(),
+		c.Request.Context(),
 		"device payload accepted",
-		"remote_addr", r.RemoteAddr,
+		"remote_addr", c.Request.RemoteAddr,
 		"events", len(payload.Events),
 		"images", len(payload.Images),
 	)
 
-	writeDeviceSuccess(w)
+	writeDeviceSuccess(c)
 }
 
-func writeDeviceSuccess(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
+func (h *Handler) HandleAttendanceRecords(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
 
-	_ = json.NewEncoder(w).Encode(domain.Response{
+	query, err := parseAttendanceRecordQuery(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	records, err := h.service.ListAttendanceRecords(c.Request.Context(), query)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "failed to list attendance records")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.ListAttendanceRecordsResponse{
+		Records: toAttendanceRecordDTOs(records),
+	})
+}
+
+func writeDeviceSuccess(c *gin.Context) {
+	c.JSON(http.StatusOK, domain.Response{
 		Code:    0,
 		Message: "success",
 	})
+}
+
+func writeError(c *gin.Context, status int, code string, message string) {
+	c.JSON(status, gin.H{
+		"code":    code,
+		"message": message,
+	})
+}
+
+func parseAttendanceRecordQuery(c *gin.Context) (domain.AttendanceRecordQuery, error) {
+	startTime, err := parseUnixQuery(c, "start_time")
+	if err != nil {
+		return domain.AttendanceRecordQuery{}, err
+	}
+	endTime, err := parseUnixQuery(c, "end_time")
+	if err != nil {
+		return domain.AttendanceRecordQuery{}, err
+	}
+	if !startTime.IsZero() && !endTime.IsZero() && endTime.Before(startTime) {
+		return domain.AttendanceRecordQuery{}, errors.New("end_time must not be before start_time")
+	}
+
+	limit, err := parseIntQuery(c, "limit")
+	if err != nil {
+		return domain.AttendanceRecordQuery{}, err
+	}
+	offset, err := parseIntQuery(c, "offset")
+	if err != nil {
+		return domain.AttendanceRecordQuery{}, err
+	}
+
+	return domain.AttendanceRecordQuery{
+		UserID:    strings.TrimSpace(c.Query("user_id")),
+		DeviceSN:  strings.TrimSpace(c.Query("device_sn")),
+		StartTime: startTime,
+		EndTime:   endTime,
+		Limit:     limit,
+		Offset:    offset,
+	}, nil
+}
+
+func parseUnixQuery(c *gin.Context, key string) (time.Time, error) {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return time.Time{}, nil
+	}
+
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		return time.Time{}, fmt.Errorf("%s must be a positive unix timestamp", key)
+	}
+
+	return time.Unix(parsed, 0), nil
+}
+
+func parseIntQuery(c *gin.Context, key string) (int, error) {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return 0, nil
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer", key)
+	}
+
+	return parsed, nil
+}
+
+func toAttendanceRecordDTOs(records []domain.AttendanceRecord) []attendancev1.AttendanceRecordDTO {
+	dtos := make([]attendancev1.AttendanceRecordDTO, 0, len(records))
+	for _, record := range records {
+		dtos = append(dtos, toAttendanceRecordDTO(record))
+	}
+
+	return dtos
+}
+
+func toAttendanceRecordDTO(record domain.AttendanceRecord) attendancev1.AttendanceRecordDTO {
+	return attendancev1.AttendanceRecordDTO{
+		UserID:        record.UserID,
+		UserName:      record.CardName,
+		DeviceSN:      record.DeviceSN,
+		Direction:     string(record.Direction),
+		Method:        int32(record.Method),
+		MethodName:    record.Method.String(),
+		Status:        record.Status,
+		EventTime:     timeToUnixSeconds(record.EventTime),
+		ReceivedAt:    timeToUnixSeconds(record.ReceivedAt),
+		HasSnapshot:   record.ImageCount > 0,
+		SnapshotCount: record.ImageCount,
+	}
+}
+
+func timeToUnixSeconds(value time.Time) int64 {
+	if value.IsZero() {
+		return 0
+	}
+
+	return value.Unix()
 }
 
 type LoggingConsumer struct {

@@ -37,6 +37,22 @@ max_idle_conns = 8
 conn_max_lifetime = "10m"
 connect_timeout = "7s"
 
+[nacos]
+enabled = true
+address = "127.0.0.1:8848"
+namespace = "public"
+group = "ATTENDANCE_GROUP"
+service_name = "attendance-api"
+ip = "192.168.120.10"
+port = 18080
+cluster_name = "cluster-a"
+weight = 2.5
+ephemeral = true
+timeout_ms = 3000
+log_dir = "/tmp/nacos/log"
+cache_dir = "/tmp/nacos/cache"
+log_level = "warn"
+
 [log]
 level = "debug"
 file_path = "/tmp/attendance.log"
@@ -73,6 +89,33 @@ file_path = "/tmp/attendance.log"
 	}
 	if cfg.Database.ConnectTimeout.Std() != 7*time.Second {
 		t.Fatalf("unexpected connect timeout: %s", cfg.Database.ConnectTimeout)
+	}
+	if !cfg.Nacos.Enabled {
+		t.Fatal("expected nacos to be enabled")
+	}
+	if cfg.Nacos.ServiceName != "attendance-api" {
+		t.Fatalf("unexpected nacos service name: %s", cfg.Nacos.ServiceName)
+	}
+	if cfg.Nacos.Group != "ATTENDANCE_GROUP" {
+		t.Fatalf("unexpected nacos group: %s", cfg.Nacos.Group)
+	}
+	if cfg.Nacos.IP != "192.168.120.10" {
+		t.Fatalf("unexpected nacos ip: %s", cfg.Nacos.IP)
+	}
+	if cfg.Nacos.Port != 18080 {
+		t.Fatalf("unexpected nacos port: %d", cfg.Nacos.Port)
+	}
+	if cfg.Nacos.ClusterName != "cluster-a" {
+		t.Fatalf("unexpected nacos cluster: %s", cfg.Nacos.ClusterName)
+	}
+	if cfg.Nacos.Weight != 2.5 {
+		t.Fatalf("unexpected nacos weight: %f", cfg.Nacos.Weight)
+	}
+	if cfg.Nacos.TimeoutMs != 3000 {
+		t.Fatalf("unexpected nacos timeout: %d", cfg.Nacos.TimeoutMs)
+	}
+	if cfg.Nacos.LogLevel != "warn" {
+		t.Fatalf("unexpected nacos log level: %s", cfg.Nacos.LogLevel)
 	}
 	if cfg.Log.Level != "debug" {
 		t.Fatalf("unexpected log level: %s", cfg.Log.Level)
@@ -111,6 +154,21 @@ dsn = "user:password@tcp(127.0.0.1:3306)/attendance?parseTime=true"
 	if cfg.Log.Level != "info" {
 		t.Fatalf("unexpected log level: %s", cfg.Log.Level)
 	}
+	if cfg.Nacos.ServiceName != "attendance" {
+		t.Fatalf("unexpected nacos service name: %s", cfg.Nacos.ServiceName)
+	}
+	if cfg.Nacos.Port != 8080 {
+		t.Fatalf("unexpected nacos port: %d", cfg.Nacos.Port)
+	}
+	if cfg.Nacos.ClusterName != "DEFAULT" {
+		t.Fatalf("unexpected nacos cluster: %s", cfg.Nacos.ClusterName)
+	}
+	if cfg.Nacos.Weight != 1 {
+		t.Fatalf("unexpected nacos weight: %f", cfg.Nacos.Weight)
+	}
+	if !cfg.Nacos.Ephemeral {
+		t.Fatal("expected nacos ephemeral default")
+	}
 }
 
 func TestLoadRejectsMissingDatabaseDSN(t *testing.T) {
@@ -135,6 +193,24 @@ dsn = "user:password@tcp(127.0.0.1:3306)/attendance?parseTime=true"
 
 [log]
 level = "trace"
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestLoadRejectsEnabledNacosWithoutIP(t *testing.T) {
+	path := writeConfigFile(t, `
+[app]
+name = "attendance"
+
+[database]
+dsn = "user:password@tcp(127.0.0.1:3306)/attendance?parseTime=true"
+
+[nacos]
+enabled = true
 `)
 
 	_, err := Load(path)

@@ -2,18 +2,19 @@
 
 适配大华 `DH-ASI41KH-M` 门禁设备的考勤事件接收服务。
 
-项目面向门禁设备主动上报场景，负责接收通行记录、门状态变更等事件，解析后写入 MySQL，并为后续通过 Dubbo-Go/Nacos 向 Web 提供考勤记录查询服务打基础。
+项目面向门禁设备主动上报和前端查询场景，负责接收通行记录、门状态变更等事件，解析后写入 MySQL，并通过 HTTP API 为前端提供考勤记录查询能力。
 
 ## 项目状态
 
-当前已完成设备 HTTP 上报接入、JSON/multipart 解析、考勤记录与门状态记录入库、基础去重、配置文件启动，以及 Dubbo-Go + Nacos 服务注册入口。
+当前已完成设备 HTTP 上报接入、JSON/multipart 解析、考勤记录与门状态记录入库、基础去重、配置文件启动、Gin HTTP API，以及 Nacos SDK 服务注册入口。
 
 ## 技术栈
 
 - Go `1.26.5`
 - MySQL
 - TOML 配置文件
-- Dubbo-Go / Nacos
+- Gin
+- Nacos Go SDK
 - HTTP POST
 - JSON；包含抓拍图片时支持 `multipart/x-mixed-replace`、`multipart/form-data`
 
@@ -87,15 +88,6 @@ max_idle_conns = 5
 conn_max_lifetime = "30m"
 connect_timeout = "5s"
 
-[dubbo]
-enabled = false
-interface = "attendance.v1.AttendanceService"
-group = "DEFAULT_GROUP"
-version = "1.0.0"
-protocol = "triple"
-port = 20000
-advertise_ip = ""
-
 [nacos]
 enabled = false
 address = "127.0.0.1:8848"
@@ -103,6 +95,16 @@ namespace = "public"
 group = "DEFAULT_GROUP"
 username = ""
 password = ""
+service_name = "dahua-attendance-backend"
+ip = ""
+port = 8080
+cluster_name = "DEFAULT"
+weight = 1.0
+ephemeral = true
+timeout_ms = 5000
+log_dir = ""
+cache_dir = ""
+log_level = "info"
 
 [log]
 level = "info"
@@ -111,7 +113,7 @@ file_path = ""
 
 `log.file_path` 为空时日志输出到标准输出。配置文件缺失、`app.name` 为空、`database.dsn` 为空或日志级别非法时，服务会启动失败。
 
-启用 Dubbo-Go 服务注册时，将 `dubbo.enabled` 设置为 `true`，并填写 Web 服务可访问的 `dubbo.advertise_ip`。`dubbo.enabled = true` 时会自动启用 Nacos 注册。
+启用 Nacos 注册时，将 `nacos.enabled` 设置为 `true`，并填写前端或网关可访问的 `nacos.ip` 和 `nacos.port`。
 
 ### 检查工程
 
@@ -124,8 +126,20 @@ go test ./...
 - `GET /healthz`：健康检查
 - `POST /`：设备默认上报入口
 - `POST /api/v1/device/events`：设备上报入口
+- `GET /api/v1/attendance/records`：前端查询考勤记录
 
 设备上报请求会被解析为 `AccessControl` 或 `DoorStatus` 事件，并分别写入 `attendance_records` 和 `door_status_records`。
+
+考勤记录查询支持以下查询参数：
+
+```text
+user_id
+device_sn
+start_time
+end_time
+limit
+offset
+```
 
 ## 设备协议
 
@@ -140,11 +154,9 @@ go test ./...
 
 完整的字段定义、事件类型和报文示例请参阅 [`REVERSE.md`](REVERSE.md)。
 
-## 服务契约
+## 服务注册
 
-`api/attendance/v1` 定义 Web 查询侧使用的请求、响应和 DTO。
-
-`internal/transport/dubbo` 已实现 `AttendanceProvider` 适配层和 Dubbo-Go server 启动封装。启用 `dubbo.enabled` 后，服务会使用 Triple 协议并通过 Nacos 注册 `attendance.v1.AttendanceService`。
+启用 `nacos.enabled` 后，服务会通过 Nacos Go SDK 注册当前 Gin HTTP 服务实例。Nacos 仅用于服务注册与发现。
 
 ## 开发说明
 

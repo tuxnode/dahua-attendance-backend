@@ -1,11 +1,5 @@
 package v1
 
-import "context"
-
-type AttendanceService interface {
-	ListAttendanceRecords(ctx context.Context, req *ListAttendanceRecordsRequest) (*ListAttendanceRecordsResponse, error)
-}
-
 type ListAttendanceRecordsRequest struct {
 	UserID    string `json:"user_id"`
 	DeviceSN  string `json:"device_sn"`

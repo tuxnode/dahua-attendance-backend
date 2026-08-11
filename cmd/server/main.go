@@ -15,7 +15,7 @@ import (
 	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/repository"
 	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/service"
 	"github.com/tuxnode/dahua-attendance-backend/internal/config"
-	transportdubbo "github.com/tuxnode/dahua-attendance-backend/internal/transport/dubbo"
+	nacosregistry "github.com/tuxnode/dahua-attendance-backend/internal/nacos"
 	transporthttp "github.com/tuxnode/dahua-attendance-backend/internal/transport/http"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -36,22 +36,18 @@ func main() {
 	defer closeLogger()
 	slog.SetDefault(logger)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", handleHealthz)
-
 	attendanceService, cleanup := buildAttendanceService(cfg.Database, logger)
 	defer cleanup()
 
-	handler := transporthttp.NewHandler(
+	router := transporthttp.NewRouter(
 		attendanceService,
 		transporthttp.WithLogger(logger),
 		transporthttp.WithMaxBodyBytes(cfg.HTTP.MaxBodyBytes),
 	)
-	handler.RegisterRoutes(mux)
 
 	server := &http.Server{
 		Addr:              cfg.HTTP.Addr,
-		Handler:           mux,
+		Handler:           router,
 		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout.Std(),
 		ReadTimeout:       cfg.HTTP.ReadTimeout.Std(),
 		WriteTimeout:      cfg.HTTP.WriteTimeout.Std(),
@@ -60,83 +56,62 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	runCtx, cancelRun := context.WithCancel(context.Background())
-	defer cancelRun()
 
-	dubboServer, err := transportdubbo.NewServer(
-		*cfg,
-		transportdubbo.NewAttendanceProvider(attendanceService),
-		logger,
-	)
+	registry, err := nacosregistry.NewRegistry(cfg.Nacos, logger)
 	if err != nil {
-		logger.Error("create dubbo server failed", "error", err)
+		logger.Error("create nacos registry failed", "error", err)
+		os.Exit(1)
+	}
+	if err := registry.Register(context.Background()); err != nil {
+		logger.Error("register nacos instance failed", "error", err)
 		os.Exit(1)
 	}
 
-	errCh := make(chan componentError, 2)
+	errCh := make(chan error, 1)
 	go func() {
 		logger.Info(
-			"device HTTP server started",
+			"gin HTTP server started",
 			"app", cfg.App.Name,
 			"env", cfg.App.Env,
 			"addr", cfg.HTTP.Addr,
-			"paths", []string{transporthttp.DefaultPath, transporthttp.DeviceEventsPath},
+			"paths", []string{
+				transporthttp.DefaultPath,
+				transporthttp.DeviceEventsPath,
+				transporthttp.AttendanceRecordsPath,
+			},
 			"health_path", "/healthz",
 		)
 		err := server.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- componentError{name: "http", err: err}
+			errCh <- err
 			return
 		}
-		errCh <- componentError{name: "http"}
+		errCh <- nil
 	}()
 
-	if dubboServer != nil {
-		go func() {
-			err := dubboServer.Start(runCtx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				errCh <- componentError{name: "dubbo", err: err}
-				return
-			}
-			errCh <- componentError{name: "dubbo"}
-		}()
-	} else {
-		logger.Info("dubbo server disabled")
-	}
-
 	select {
-	case result := <-errCh:
-		if result.err != nil {
-			cancelRun()
-			logger.Error("server component failed", "component", result.name, "error", result.err)
+	case err := <-errCh:
+		if err != nil {
+			logger.Error("gin HTTP server failed", "error", err)
 			os.Exit(1)
 		}
 	case <-ctx.Done():
 		logger.Info("shutdown signal received")
 	}
 
-	cancelRun()
-
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTP.ShutdownTimeout.Std())
 	defer cancel()
 
-	if dubboServer != nil {
-		if err := dubboServer.Stop(shutdownCtx); err != nil {
-			logger.Warn("dubbo server shutdown failed", "error", err)
-		}
+	if err := registry.Deregister(shutdownCtx); err != nil {
+		logger.Warn("deregister nacos instance failed", "error", err)
 	}
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Error("device HTTP server shutdown failed", "error", err)
+		logger.Error("gin HTTP server shutdown failed", "error", err)
 		os.Exit(1)
 	}
 
-	logger.Info("device HTTP server stopped")
-}
-
-type componentError struct {
-	name string
-	err  error
+	logger.Info("gin HTTP server stopped")
 }
 
 func buildAttendanceService(cfg config.DatabaseConfig, logger *slog.Logger) (*service.Service, func()) {
@@ -204,10 +179,4 @@ func buildLogger(cfg config.LogConfig) (*slog.Logger, func()) {
 	}
 
 	return slog.New(slog.NewJSONHandler(output, &slog.HandlerOptions{Level: level})), cleanup
-}
-
-func handleHealthz(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("ok\n"))
 }
