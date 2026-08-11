@@ -1,0 +1,12 @@
+.git
+.gitignore
+.DS_Store
+
+*.log
+log.txt
+device_http.log
+
+tmp/
+dist/
+build/
+coverage/

@@ -62,6 +62,24 @@ go run ./cmd/server -config configs/config.example.toml
 
 配置文件中的 `database.dsn` 必须指向可访问的 MySQL；启动时会连接数据库并启用持久化写入。
 
+### Docker 启动
+
+使用 [docker-compose.yml](docker-compose.yml) 启动应用与 MySQL，数据库会自动初始化：
+
+```bash
+docker compose up -d --build
+```
+
+服务启动后监听 `http://127.0.0.1:8080`，健康检查为 `GET /healthz`。停止并清理：
+
+```bash
+docker compose down
+```
+
+如需连入已存在的 MySQL，可修改 [configs/config.docker.toml](configs/config.docker.toml) 中的 `database.dsn`，并在 docker-compose.yml 中移除 `mysql` 服务后单独启动 `app`。
+
+Docker 镜像默认使用 `configs/config.docker.toml`，该配置不包含 `[nacos]` 段，因此默认不会连接 Nacos。如需启用服务注册，在 `config.docker.toml` 中补充 `[nacos]` 配置并设置 `enabled = true`。
+
 ### 配置文件
 
 参考 [`configs/config.example.toml`](configs/config.example.toml)：

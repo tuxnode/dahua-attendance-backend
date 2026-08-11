@@ -1,0 +1,42 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GO_VERSION: "1.26.5"
+    image: dahua-attendance-backend:local
+    container_name: dahua-attendance-backend
+    command: ["-config", "/app/configs/config.docker.toml"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./configs/config.docker.toml:/app/configs/config.docker.toml:ro
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    container_name: dahua-attendance-mysql
+    environment:
+      MYSQL_DATABASE: dahua_attendance
+      MYSQL_USER: attendance
+      MYSQL_PASSWORD: attendance_password
+      MYSQL_ROOT_PASSWORD: root_password
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/schema.mysql.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
