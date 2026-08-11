@@ -17,13 +17,17 @@ import (
 )
 
 const (
-	DefaultMaxBodyBytes   = 8 << 20
-	DefaultPath           = "/"
-	DeviceEventsPath      = "/api/v1/device/events"
-	AttendanceRecordsPath = "/api/v1/attendance/records"
-	DailyAttendancePath   = "/api/v1/attendance/daily"
+	DefaultMaxBodyBytes      = 8 << 20
+	DefaultPath              = "/"
+	DeviceEventsPath         = "/api/v1/device/events"
+	AttendanceRecordsPath    = "/api/v1/attendance/records"
+	DailyAttendancePath      = "/api/v1/attendance/daily"
+	MonthlyAttendancePath    = "/api/v1/attendance/monthly"
+	AttendanceSummaryPath    = "/api/v1/attendance/summary"
+	AttendanceExceptionsPath = "/api/v1/attendance/exceptions"
 
-	queryDateLayout = "2006-01-02"
+	queryDateLayout  = "2006-01-02"
+	queryMonthLayout = "2006-01"
 )
 
 type EventConsumer interface {
@@ -38,10 +42,17 @@ type DailyAttendanceQueryService interface {
 	ListDailyAttendance(ctx context.Context, query domain.DailyAttendanceQuery) ([]domain.DailyAttendance, error)
 }
 
+type AttendanceStatsService interface {
+	ListMonthlyAttendance(ctx context.Context, query domain.MonthlyAttendanceQuery) ([]domain.MonthlyAttendance, error)
+	GetAttendanceSummary(ctx context.Context, query domain.AttendanceSummaryQuery) (domain.AttendanceSummary, error)
+	ListAttendanceExceptions(ctx context.Context, query domain.AttendanceExceptionQuery) ([]domain.DailyAttendance, error)
+}
+
 type AttendanceService interface {
 	EventConsumer
 	AttendanceQueryService
 	DailyAttendanceQueryService
+	AttendanceStatsService
 }
 
 type Handler struct {
@@ -79,6 +90,9 @@ func NewRouter(service AttendanceService, opts ...Option) *gin.Engine {
 	router.POST(DeviceEventsPath, handler.HandleDeviceEvents)
 	router.GET(AttendanceRecordsPath, handler.HandleAttendanceRecords)
 	router.GET(DailyAttendancePath, handler.HandleDailyAttendance)
+	router.GET(MonthlyAttendancePath, handler.HandleMonthlyAttendance)
+	router.GET(AttendanceSummaryPath, handler.HandleAttendanceSummary)
+	router.GET(AttendanceExceptionsPath, handler.HandleAttendanceExceptions)
 
 	return router
 }
@@ -197,6 +211,75 @@ func (h *Handler) HandleDailyAttendance(c *gin.Context) {
 	})
 }
 
+func (h *Handler) HandleMonthlyAttendance(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	query, err := parseMonthlyAttendanceQuery(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	records, err := h.service.ListMonthlyAttendance(c.Request.Context(), query)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "failed to list monthly attendance")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.ListMonthlyAttendanceResponse{
+		Records: toMonthlyAttendanceDTOs(records),
+	})
+}
+
+func (h *Handler) HandleAttendanceSummary(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	query, err := parseAttendanceSummaryQuery(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	summary, err := h.service.GetAttendanceSummary(c.Request.Context(), query)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "failed to get attendance summary")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.GetAttendanceSummaryResponse{
+		Summary: toAttendanceSummaryDTO(summary),
+	})
+}
+
+func (h *Handler) HandleAttendanceExceptions(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	query, err := parseAttendanceExceptionQuery(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	records, err := h.service.ListAttendanceExceptions(c.Request.Context(), query)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "failed to list attendance exceptions")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.ListAttendanceExceptionsResponse{
+		Records: toDailyAttendanceDTOs(records),
+	})
+}
+
 func writeDeviceSuccess(c *gin.Context) {
 	c.JSON(http.StatusOK, domain.Response{
 		Code:    0,
@@ -244,36 +327,9 @@ func parseAttendanceRecordQuery(c *gin.Context) (domain.AttendanceRecordQuery, e
 }
 
 func parseDailyAttendanceQuery(c *gin.Context) (domain.DailyAttendanceQuery, error) {
-	dateValue := strings.TrimSpace(c.Query("date"))
-	startDateValue := strings.TrimSpace(c.Query("start_date"))
-	endDateValue := strings.TrimSpace(c.Query("end_date"))
-
-	var startDate time.Time
-	var endDate time.Time
-	var err error
-
-	if dateValue != "" {
-		if startDateValue != "" || endDateValue != "" {
-			return domain.DailyAttendanceQuery{}, errors.New("date cannot be combined with start_date or end_date")
-		}
-
-		startDate, err = parseDateValue("date", dateValue)
-		if err != nil {
-			return domain.DailyAttendanceQuery{}, err
-		}
-		endDate = startDate
-	} else {
-		startDate, err = parseDateQuery(c, "start_date")
-		if err != nil {
-			return domain.DailyAttendanceQuery{}, err
-		}
-		endDate, err = parseDateQuery(c, "end_date")
-		if err != nil {
-			return domain.DailyAttendanceQuery{}, err
-		}
-		if !startDate.IsZero() && !endDate.IsZero() && endDate.Before(startDate) {
-			return domain.DailyAttendanceQuery{}, errors.New("end_date must not be before start_date")
-		}
+	startDate, endDate, err := parseDateSelection(c)
+	if err != nil {
+		return domain.DailyAttendanceQuery{}, err
 	}
 
 	limit, err := parseIntQuery(c, "limit")
@@ -286,6 +342,69 @@ func parseDailyAttendanceQuery(c *gin.Context) (domain.DailyAttendanceQuery, err
 	}
 
 	return domain.DailyAttendanceQuery{
+		UserID:    strings.TrimSpace(c.Query("user_id")),
+		DeviceSN:  strings.TrimSpace(c.Query("device_sn")),
+		StartDate: startDate,
+		EndDate:   endDate,
+		Limit:     limit,
+		Offset:    offset,
+	}, nil
+}
+
+func parseMonthlyAttendanceQuery(c *gin.Context) (domain.MonthlyAttendanceQuery, error) {
+	month, err := parseMonthQuery(c, "month")
+	if err != nil {
+		return domain.MonthlyAttendanceQuery{}, err
+	}
+
+	limit, err := parseIntQuery(c, "limit")
+	if err != nil {
+		return domain.MonthlyAttendanceQuery{}, err
+	}
+	offset, err := parseIntQuery(c, "offset")
+	if err != nil {
+		return domain.MonthlyAttendanceQuery{}, err
+	}
+
+	return domain.MonthlyAttendanceQuery{
+		UserID:   strings.TrimSpace(c.Query("user_id")),
+		DeviceSN: strings.TrimSpace(c.Query("device_sn")),
+		Month:    month,
+		Limit:    limit,
+		Offset:   offset,
+	}, nil
+}
+
+func parseAttendanceSummaryQuery(c *gin.Context) (domain.AttendanceSummaryQuery, error) {
+	startDate, endDate, err := parseDateSelection(c)
+	if err != nil {
+		return domain.AttendanceSummaryQuery{}, err
+	}
+
+	return domain.AttendanceSummaryQuery{
+		UserID:    strings.TrimSpace(c.Query("user_id")),
+		DeviceSN:  strings.TrimSpace(c.Query("device_sn")),
+		StartDate: startDate,
+		EndDate:   endDate,
+	}, nil
+}
+
+func parseAttendanceExceptionQuery(c *gin.Context) (domain.AttendanceExceptionQuery, error) {
+	startDate, endDate, err := parseDateSelection(c)
+	if err != nil {
+		return domain.AttendanceExceptionQuery{}, err
+	}
+
+	limit, err := parseIntQuery(c, "limit")
+	if err != nil {
+		return domain.AttendanceExceptionQuery{}, err
+	}
+	offset, err := parseIntQuery(c, "offset")
+	if err != nil {
+		return domain.AttendanceExceptionQuery{}, err
+	}
+
+	return domain.AttendanceExceptionQuery{
 		UserID:    strings.TrimSpace(c.Query("user_id")),
 		DeviceSN:  strings.TrimSpace(c.Query("device_sn")),
 		StartDate: startDate,
@@ -309,6 +428,39 @@ func parseUnixQuery(c *gin.Context, key string) (time.Time, error) {
 	return time.Unix(parsed, 0), nil
 }
 
+func parseDateSelection(c *gin.Context) (time.Time, time.Time, error) {
+	dateValue := strings.TrimSpace(c.Query("date"))
+	startDateValue := strings.TrimSpace(c.Query("start_date"))
+	endDateValue := strings.TrimSpace(c.Query("end_date"))
+
+	if dateValue != "" {
+		if startDateValue != "" || endDateValue != "" {
+			return time.Time{}, time.Time{}, errors.New("date cannot be combined with start_date or end_date")
+		}
+
+		date, err := parseDateValue("date", dateValue)
+		if err != nil {
+			return time.Time{}, time.Time{}, err
+		}
+
+		return date, date, nil
+	}
+
+	startDate, err := parseDateQuery(c, "start_date")
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	endDate, err := parseDateQuery(c, "end_date")
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	if !startDate.IsZero() && !endDate.IsZero() && endDate.Before(startDate) {
+		return time.Time{}, time.Time{}, errors.New("end_date must not be before start_date")
+	}
+
+	return startDate, endDate, nil
+}
+
 func parseDateQuery(c *gin.Context, key string) (time.Time, error) {
 	value := strings.TrimSpace(c.Query(key))
 	if value == "" {
@@ -322,6 +474,20 @@ func parseDateValue(key string, value string) (time.Time, error) {
 	parsed, err := time.ParseInLocation(queryDateLayout, value, time.Local)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("%s must use YYYY-MM-DD format", key)
+	}
+
+	return parsed, nil
+}
+
+func parseMonthQuery(c *gin.Context, key string) (time.Time, error) {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return time.Time{}, nil
+	}
+
+	parsed, err := time.ParseInLocation(queryMonthLayout, value, time.Local)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s must use YYYY-MM format", key)
 	}
 
 	return parsed, nil
@@ -392,6 +558,52 @@ func toDailyAttendanceDTO(record domain.DailyAttendance) attendancev1.DailyAtten
 		EarlyLeaveSeconds: int64(record.EarlyLeaveDuration.Seconds()),
 		RecordCount:       record.RecordCount,
 		SnapshotCount:     record.SnapshotCount,
+	}
+}
+
+func toMonthlyAttendanceDTOs(records []domain.MonthlyAttendance) []attendancev1.MonthlyAttendanceDTO {
+	dtos := make([]attendancev1.MonthlyAttendanceDTO, 0, len(records))
+	for _, record := range records {
+		dtos = append(dtos, toMonthlyAttendanceDTO(record))
+	}
+
+	return dtos
+}
+
+func toMonthlyAttendanceDTO(record domain.MonthlyAttendance) attendancev1.MonthlyAttendanceDTO {
+	return attendancev1.MonthlyAttendanceDTO{
+		Month:    record.Month.Format(queryMonthLayout),
+		UserID:   record.UserID,
+		UserName: record.UserName,
+		DeviceSN: record.DeviceSN,
+		Stats:    toAttendanceStatsDTO(record.Stats),
+	}
+}
+
+func toAttendanceSummaryDTO(summary domain.AttendanceSummary) attendancev1.AttendanceSummaryDTO {
+	return attendancev1.AttendanceSummaryDTO{
+		StartDate: summary.StartDate.Format(queryDateLayout),
+		EndDate:   summary.EndDate.Format(queryDateLayout),
+		UserCount: summary.UserCount,
+		Stats:     toAttendanceStatsDTO(summary.Stats),
+	}
+}
+
+func toAttendanceStatsDTO(stats domain.AttendanceStats) attendancev1.AttendanceStatsDTO {
+	return attendancev1.AttendanceStatsDTO{
+		TotalDays:              stats.TotalDays,
+		NormalDays:             stats.NormalDays,
+		AbnormalDays:           stats.AbnormalDays,
+		LateDays:               stats.LateDays,
+		EarlyLeaveDays:         stats.EarlyLeaveDays,
+		LateAndEarlyLeaveDays:  stats.LateAndEarlyLeaveDays,
+		MissingCheckInDays:     stats.MissingCheckInDays,
+		MissingCheckOutDays:    stats.MissingCheckOutDays,
+		AbsentDays:             stats.AbsentDays,
+		RecordCount:            stats.RecordCount,
+		SnapshotCount:          stats.SnapshotCount,
+		TotalLateSeconds:       int64(stats.TotalLateDuration.Seconds()),
+		TotalEarlyLeaveSeconds: int64(stats.TotalEarlyLeaveDuration.Seconds()),
 	}
 }
 

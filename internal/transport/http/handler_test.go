@@ -21,17 +21,28 @@ import (
 )
 
 type fakeService struct {
-	payload           *parser.ParsedPayload
-	records           []domain.AttendanceRecord
-	dailyRecords      []domain.DailyAttendance
-	query             domain.AttendanceRecordQuery
-	dailyQuery        domain.DailyAttendanceQuery
-	handleErr         error
-	listErr           error
-	listDailyErr      error
-	handleDeviceCalls int
-	listRecordsCalls  int
-	listDailyCalls    int
+	payload            *parser.ParsedPayload
+	records            []domain.AttendanceRecord
+	dailyRecords       []domain.DailyAttendance
+	monthlyRecords     []domain.MonthlyAttendance
+	summary            domain.AttendanceSummary
+	query              domain.AttendanceRecordQuery
+	dailyQuery         domain.DailyAttendanceQuery
+	monthlyQuery       domain.MonthlyAttendanceQuery
+	summaryQuery       domain.AttendanceSummaryQuery
+	exceptionQuery     domain.AttendanceExceptionQuery
+	handleErr          error
+	listErr            error
+	listDailyErr       error
+	listMonthlyErr     error
+	summaryErr         error
+	listExceptionErr   error
+	handleDeviceCalls  int
+	listRecordsCalls   int
+	listDailyCalls     int
+	listMonthlyCalls   int
+	summaryCalls       int
+	listExceptionCalls int
 }
 
 func (s *fakeService) HandleDevicePayload(_ context.Context, payload *parser.ParsedPayload) error {
@@ -54,6 +65,33 @@ func (s *fakeService) ListDailyAttendance(_ context.Context, query domain.DailyA
 	s.dailyQuery = query
 	if s.listDailyErr != nil {
 		return nil, s.listDailyErr
+	}
+	return append([]domain.DailyAttendance(nil), s.dailyRecords...), nil
+}
+
+func (s *fakeService) ListMonthlyAttendance(_ context.Context, query domain.MonthlyAttendanceQuery) ([]domain.MonthlyAttendance, error) {
+	s.listMonthlyCalls++
+	s.monthlyQuery = query
+	if s.listMonthlyErr != nil {
+		return nil, s.listMonthlyErr
+	}
+	return append([]domain.MonthlyAttendance(nil), s.monthlyRecords...), nil
+}
+
+func (s *fakeService) GetAttendanceSummary(_ context.Context, query domain.AttendanceSummaryQuery) (domain.AttendanceSummary, error) {
+	s.summaryCalls++
+	s.summaryQuery = query
+	if s.summaryErr != nil {
+		return domain.AttendanceSummary{}, s.summaryErr
+	}
+	return s.summary, nil
+}
+
+func (s *fakeService) ListAttendanceExceptions(_ context.Context, query domain.AttendanceExceptionQuery) ([]domain.DailyAttendance, error) {
+	s.listExceptionCalls++
+	s.exceptionQuery = query
+	if s.listExceptionErr != nil {
+		return nil, s.listExceptionErr
 	}
 	return append([]domain.DailyAttendance(nil), s.dailyRecords...), nil
 }
@@ -401,6 +439,180 @@ func TestHandleDailyAttendanceReturnsServerErrorWhenServiceFails(t *testing.T) {
 
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("unexpected status: %d", response.Code)
+	}
+}
+
+func TestHandleMonthlyAttendanceReturnsRecords(t *testing.T) {
+	month := time.Date(2026, 8, 1, 0, 0, 0, 0, time.Local)
+	service := &fakeService{
+		monthlyRecords: []domain.MonthlyAttendance{
+			{
+				Month:    month,
+				UserID:   "REDACTED_USER_ID",
+				UserName: "REDACTED_NAME",
+				DeviceSN: "REDACTED_DEVICE_SN",
+				Stats: domain.AttendanceStats{
+					TotalDays:               31,
+					NormalDays:              20,
+					AbnormalDays:            11,
+					LateDays:                3,
+					EarlyLeaveDays:          2,
+					LateAndEarlyLeaveDays:   1,
+					AbsentDays:              6,
+					RecordCount:             50,
+					SnapshotCount:           10,
+					TotalLateDuration:       30 * time.Minute,
+					TotalEarlyLeaveDuration: 20 * time.Minute,
+				},
+			},
+		},
+	}
+	router := newTestRouter(service)
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.MonthlyAttendancePath+"?user_id=REDACTED_USER_ID&device_sn=REDACTED_DEVICE_SN&month=2026-08&limit=20&offset=40", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.monthlyQuery.UserID != "REDACTED_USER_ID" {
+		t.Fatalf("unexpected user id filter: %s", service.monthlyQuery.UserID)
+	}
+	if service.monthlyQuery.DeviceSN != "REDACTED_DEVICE_SN" {
+		t.Fatalf("unexpected device sn filter: %s", service.monthlyQuery.DeviceSN)
+	}
+	if service.monthlyQuery.Month.Format("2006-01") != "2026-08" {
+		t.Fatalf("unexpected month: %s", service.monthlyQuery.Month)
+	}
+	if service.monthlyQuery.Limit != 20 || service.monthlyQuery.Offset != 40 {
+		t.Fatalf("unexpected pagination: limit=%d offset=%d", service.monthlyQuery.Limit, service.monthlyQuery.Offset)
+	}
+
+	body := response.Body.String()
+	for _, expected := range []string{
+		`"month":"2026-08"`,
+		`"total_days":31`,
+		`"normal_days":20`,
+		`"abnormal_days":11`,
+		`"late_days":3`,
+		`"total_late_seconds":1800`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("response missing %s: %s", expected, body)
+		}
+	}
+}
+
+func TestHandleMonthlyAttendanceRejectsInvalidMonth(t *testing.T) {
+	router := newTestRouter(&fakeService{})
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.MonthlyAttendancePath+"?month=2026/08", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d", response.Code)
+	}
+}
+
+func TestHandleAttendanceSummaryReturnsSummary(t *testing.T) {
+	startDate := time.Date(2026, 8, 1, 0, 0, 0, 0, time.Local)
+	endDate := time.Date(2026, 8, 10, 0, 0, 0, 0, time.Local)
+	service := &fakeService{
+		summary: domain.AttendanceSummary{
+			StartDate: startDate,
+			EndDate:   endDate,
+			UserCount: 3,
+			Stats: domain.AttendanceStats{
+				TotalDays:     10,
+				NormalDays:    7,
+				AbnormalDays:  3,
+				RecordCount:   20,
+				SnapshotCount: 5,
+			},
+		},
+	}
+	router := newTestRouter(service)
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.AttendanceSummaryPath+"?start_date=2026-08-01&end_date=2026-08-10&device_sn=REDACTED_DEVICE_SN", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.summaryQuery.DeviceSN != "REDACTED_DEVICE_SN" {
+		t.Fatalf("unexpected device sn filter: %s", service.summaryQuery.DeviceSN)
+	}
+	if service.summaryQuery.StartDate.Format("2006-01-02") != "2026-08-01" {
+		t.Fatalf("unexpected start date: %s", service.summaryQuery.StartDate)
+	}
+	if service.summaryQuery.EndDate.Format("2006-01-02") != "2026-08-10" {
+		t.Fatalf("unexpected end date: %s", service.summaryQuery.EndDate)
+	}
+
+	body := response.Body.String()
+	for _, expected := range []string{
+		`"start_date":"2026-08-01"`,
+		`"end_date":"2026-08-10"`,
+		`"user_count":3`,
+		`"total_days":10`,
+		`"normal_days":7`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("response missing %s: %s", expected, body)
+		}
+	}
+}
+
+func TestHandleAttendanceExceptionsReturnsRecords(t *testing.T) {
+	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.Local)
+	service := &fakeService{
+		dailyRecords: []domain.DailyAttendance{
+			{
+				Date:         date,
+				UserID:       "REDACTED_USER_ID",
+				UserName:     "REDACTED_NAME",
+				DeviceSN:     "REDACTED_DEVICE_SN",
+				Status:       domain.DailyAttendanceStatusLate,
+				Exceptions:   []domain.DailyAttendanceException{domain.DailyAttendanceExceptionLate},
+				WorkStartAt:  date.Add(9 * time.Hour),
+				FirstEntryAt: date.Add(9*time.Hour + 10*time.Minute),
+				LateDuration: 10 * time.Minute,
+				RecordCount:  2,
+			},
+		},
+	}
+	router := newTestRouter(service)
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.AttendanceExceptionsPath+"?date=2026-08-10&limit=10&offset=5", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.exceptionQuery.StartDate.Format("2006-01-02") != "2026-08-10" {
+		t.Fatalf("unexpected start date: %s", service.exceptionQuery.StartDate)
+	}
+	if service.exceptionQuery.Limit != 10 || service.exceptionQuery.Offset != 5 {
+		t.Fatalf("unexpected pagination: limit=%d offset=%d", service.exceptionQuery.Limit, service.exceptionQuery.Offset)
+	}
+
+	body := response.Body.String()
+	for _, expected := range []string{
+		`"status":"late"`,
+		`"exceptions":["late"]`,
+		`"late_seconds":600`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("response missing %s: %s", expected, body)
+		}
 	}
 }
 

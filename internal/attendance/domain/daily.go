@@ -42,6 +42,30 @@ type DailyAttendanceQuery struct {
 	Offset    int
 }
 
+type MonthlyAttendanceQuery struct {
+	UserID   string
+	DeviceSN string
+	Month    time.Time
+	Limit    int
+	Offset   int
+}
+
+type AttendanceSummaryQuery struct {
+	UserID    string
+	DeviceSN  string
+	StartDate time.Time
+	EndDate   time.Time
+}
+
+type AttendanceExceptionQuery struct {
+	UserID    string
+	DeviceSN  string
+	StartDate time.Time
+	EndDate   time.Time
+	Limit     int
+	Offset    int
+}
+
 type DailyAttendance struct {
 	Date               time.Time
 	UserID             string
@@ -57,6 +81,37 @@ type DailyAttendance struct {
 	EarlyLeaveDuration time.Duration
 	RecordCount        int
 	SnapshotCount      int
+}
+
+type MonthlyAttendance struct {
+	Month    time.Time
+	UserID   string
+	UserName string
+	DeviceSN string
+	Stats    AttendanceStats
+}
+
+type AttendanceSummary struct {
+	StartDate time.Time
+	EndDate   time.Time
+	UserCount int
+	Stats     AttendanceStats
+}
+
+type AttendanceStats struct {
+	TotalDays               int
+	NormalDays              int
+	AbnormalDays            int
+	LateDays                int
+	EarlyLeaveDays          int
+	LateAndEarlyLeaveDays   int
+	MissingCheckInDays      int
+	MissingCheckOutDays     int
+	AbsentDays              int
+	RecordCount             int
+	SnapshotCount           int
+	TotalLateDuration       time.Duration
+	TotalEarlyLeaveDuration time.Duration
 }
 
 func (a DailyAttendance) IsAbnormal() bool {

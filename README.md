@@ -6,7 +6,7 @@
 
 ## 项目状态
 
-当前已完成设备 HTTP 上报接入、JSON/multipart 解析、考勤记录与门状态记录入库、基础去重、配置文件启动、Gin HTTP API，以及 Nacos SDK 服务注册入口。
+当前已完成设备 HTTP 上报接入、JSON/multipart 解析、考勤记录与门状态记录入库、基础去重、配置文件启动、Gin HTTP API、考勤日报/月报/汇总/异常列表查询，以及 Nacos SDK 服务注册入口。
 
 ## 技术栈
 
@@ -128,6 +128,9 @@ go test ./...
 - `POST /api/v1/device/events`：设备上报入口
 - `GET /api/v1/attendance/records`：前端查询考勤记录
 - `GET /api/v1/attendance/daily`：前端查询考勤日报
+- `GET /api/v1/attendance/monthly`：前端查询考勤月报
+- `GET /api/v1/attendance/summary`：前端查询考勤汇总
+- `GET /api/v1/attendance/exceptions`：前端查询考勤异常列表
 
 设备上报请求会被解析为 `AccessControl` 或 `DoorStatus` 事件，并分别写入 `attendance_records` 和 `door_status_records`。
 
@@ -155,6 +158,40 @@ offset
 ```
 
 `date`、`start_date` 和 `end_date` 使用 `YYYY-MM-DD` 格式。传入 `date` 时查询单日；传入 `start_date` 和 `end_date` 时查询日期范围。
+
+考勤月报查询 `GET /api/v1/attendance/monthly` 支持以下查询参数：
+
+```text
+user_id
+device_sn
+month
+limit
+offset
+```
+
+`month` 使用 `YYYY-MM` 格式，例如 `2026-08`。
+
+考勤汇总查询 `GET /api/v1/attendance/summary` 支持以下查询参数：
+
+```text
+user_id
+device_sn
+date
+start_date
+end_date
+```
+
+考勤异常列表 `GET /api/v1/attendance/exceptions` 支持以下查询参数：
+
+```text
+user_id
+device_sn
+date
+start_date
+end_date
+limit
+offset
+```
 
 ## 设备协议
 

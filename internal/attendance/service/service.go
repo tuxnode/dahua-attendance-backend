@@ -107,12 +107,82 @@ func (s *Service) ListDailyAttendance(ctx context.Context, query domain.DailyAtt
 		return nil, err
 	}
 
-	records, err := s.listDailyAttendanceRecords(ctx, normalized)
+	dailies, err := s.listDailyAttendance(ctx, normalized)
 	if err != nil {
-		return nil, fmt.Errorf("service: list daily attendance records: %w", err)
+		return nil, err
 	}
 
-	return buildDailyAttendance(normalized, records), nil
+	return paginateDailyAttendance(dailies, normalized.Limit, normalized.Offset), nil
+}
+
+func (s *Service) ListMonthlyAttendance(ctx context.Context, query domain.MonthlyAttendanceQuery) ([]domain.MonthlyAttendance, error) {
+	if s.repository == nil {
+		return nil, errors.New("service: repository is nil")
+	}
+
+	normalized := normalizeMonthlyAttendanceQuery(query, s.now())
+	dailies, err := s.listDailyAttendance(ctx, domain.DailyAttendanceQuery{
+		UserID:    normalized.UserID,
+		DeviceSN:  normalized.DeviceSN,
+		StartDate: firstDayOfMonth(normalized.Month),
+		EndDate:   lastDayOfMonth(normalized.Month),
+		Limit:     maxQueryLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	records := buildMonthlyAttendance(normalized, dailies)
+	return paginateMonthlyAttendance(records, normalized.Limit, normalized.Offset), nil
+}
+
+func (s *Service) GetAttendanceSummary(ctx context.Context, query domain.AttendanceSummaryQuery) (domain.AttendanceSummary, error) {
+	if s.repository == nil {
+		return domain.AttendanceSummary{}, errors.New("service: repository is nil")
+	}
+
+	normalized, err := normalizeAttendanceSummaryQuery(query, s.now())
+	if err != nil {
+		return domain.AttendanceSummary{}, err
+	}
+
+	dailies, err := s.listDailyAttendance(ctx, domain.DailyAttendanceQuery{
+		UserID:    normalized.UserID,
+		DeviceSN:  normalized.DeviceSN,
+		StartDate: normalized.StartDate,
+		EndDate:   normalized.EndDate,
+		Limit:     maxQueryLimit,
+	})
+	if err != nil {
+		return domain.AttendanceSummary{}, err
+	}
+
+	return buildAttendanceSummary(normalized, dailies), nil
+}
+
+func (s *Service) ListAttendanceExceptions(ctx context.Context, query domain.AttendanceExceptionQuery) ([]domain.DailyAttendance, error) {
+	if s.repository == nil {
+		return nil, errors.New("service: repository is nil")
+	}
+
+	normalized, err := normalizeAttendanceExceptionQuery(query, s.now())
+	if err != nil {
+		return nil, err
+	}
+
+	dailies, err := s.listDailyAttendance(ctx, domain.DailyAttendanceQuery{
+		UserID:    normalized.UserID,
+		DeviceSN:  normalized.DeviceSN,
+		StartDate: normalized.StartDate,
+		EndDate:   normalized.EndDate,
+		Limit:     maxQueryLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	exceptions := filterAttendanceExceptions(dailies)
+	return paginateDailyAttendance(exceptions, normalized.Limit, normalized.Offset), nil
 }
 
 func (s *Service) handleEvent(ctx context.Context, envelope domain.EventEnvelope) error {
@@ -181,6 +251,79 @@ func normalizeDailyAttendanceQuery(query domain.DailyAttendanceQuery, now time.T
 	}
 
 	return query, nil
+}
+
+func normalizeMonthlyAttendanceQuery(query domain.MonthlyAttendanceQuery, now time.Time) domain.MonthlyAttendanceQuery {
+	query.UserID = strings.TrimSpace(query.UserID)
+	query.DeviceSN = strings.TrimSpace(query.DeviceSN)
+	if query.Month.IsZero() {
+		query.Month = firstDayOfMonth(now)
+	} else {
+		query.Month = firstDayOfMonth(query.Month)
+	}
+	if query.Limit <= 0 {
+		query.Limit = defaultQueryLimit
+	}
+	if query.Limit > maxQueryLimit {
+		query.Limit = maxQueryLimit
+	}
+	if query.Offset < 0 {
+		query.Offset = 0
+	}
+
+	return query
+}
+
+func normalizeAttendanceSummaryQuery(query domain.AttendanceSummaryQuery, now time.Time) (domain.AttendanceSummaryQuery, error) {
+	dailyQuery, err := normalizeDailyAttendanceQuery(domain.DailyAttendanceQuery{
+		UserID:    query.UserID,
+		DeviceSN:  query.DeviceSN,
+		StartDate: query.StartDate,
+		EndDate:   query.EndDate,
+		Limit:     maxQueryLimit,
+	}, now)
+	if err != nil {
+		return domain.AttendanceSummaryQuery{}, err
+	}
+
+	return domain.AttendanceSummaryQuery{
+		UserID:    dailyQuery.UserID,
+		DeviceSN:  dailyQuery.DeviceSN,
+		StartDate: dailyQuery.StartDate,
+		EndDate:   dailyQuery.EndDate,
+	}, nil
+}
+
+func normalizeAttendanceExceptionQuery(query domain.AttendanceExceptionQuery, now time.Time) (domain.AttendanceExceptionQuery, error) {
+	dailyQuery, err := normalizeDailyAttendanceQuery(domain.DailyAttendanceQuery{
+		UserID:    query.UserID,
+		DeviceSN:  query.DeviceSN,
+		StartDate: query.StartDate,
+		EndDate:   query.EndDate,
+		Limit:     query.Limit,
+		Offset:    query.Offset,
+	}, now)
+	if err != nil {
+		return domain.AttendanceExceptionQuery{}, err
+	}
+
+	return domain.AttendanceExceptionQuery{
+		UserID:    dailyQuery.UserID,
+		DeviceSN:  dailyQuery.DeviceSN,
+		StartDate: dailyQuery.StartDate,
+		EndDate:   dailyQuery.EndDate,
+		Limit:     dailyQuery.Limit,
+		Offset:    dailyQuery.Offset,
+	}, nil
+}
+
+func (s *Service) listDailyAttendance(ctx context.Context, query domain.DailyAttendanceQuery) ([]domain.DailyAttendance, error) {
+	records, err := s.listDailyAttendanceRecords(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("service: list daily attendance records: %w", err)
+	}
+
+	return buildDailyAttendance(query, records), nil
 }
 
 func (s *Service) listDailyAttendanceRecords(ctx context.Context, query domain.DailyAttendanceQuery) ([]domain.AttendanceRecord, error) {
@@ -289,6 +432,14 @@ func (s *Service) handleDoorStatus(ctx context.Context, envelope domain.EventEnv
 	return nil
 }
 
+type monthlyAttendanceAggregate struct {
+	month    time.Time
+	userID   string
+	userName string
+	deviceSN string
+	stats    domain.AttendanceStats
+}
+
 type dailyAttendanceKey struct {
 	date   string
 	userID string
@@ -363,7 +514,116 @@ func buildDailyAttendance(query domain.DailyAttendanceQuery, records []domain.At
 		return dailies[i].UserID < dailies[j].UserID
 	})
 
-	return paginateDailyAttendance(dailies, query.Limit, query.Offset)
+	return dailies
+}
+
+func buildMonthlyAttendance(query domain.MonthlyAttendanceQuery, dailies []domain.DailyAttendance) []domain.MonthlyAttendance {
+	aggregates := make(map[string]*monthlyAttendanceAggregate)
+
+	for _, daily := range dailies {
+		userID := strings.TrimSpace(daily.UserID)
+		if userID == "" {
+			continue
+		}
+
+		aggregate := aggregates[userID]
+		if aggregate == nil {
+			aggregate = &monthlyAttendanceAggregate{
+				month:    firstDayOfMonth(query.Month),
+				userID:   userID,
+				userName: daily.UserName,
+				deviceSN: daily.DeviceSN,
+			}
+			aggregates[userID] = aggregate
+		}
+		if aggregate.userName == "" {
+			aggregate.userName = daily.UserName
+		}
+		if aggregate.deviceSN == "" {
+			aggregate.deviceSN = daily.DeviceSN
+		}
+
+		addDailyAttendanceStats(&aggregate.stats, daily)
+	}
+
+	records := make([]domain.MonthlyAttendance, 0, len(aggregates))
+	for _, aggregate := range aggregates {
+		records = append(records, domain.MonthlyAttendance{
+			Month:    aggregate.month,
+			UserID:   aggregate.userID,
+			UserName: aggregate.userName,
+			DeviceSN: aggregate.deviceSN,
+			Stats:    aggregate.stats,
+		})
+	}
+
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].UserID < records[j].UserID
+	})
+
+	return records
+}
+
+func buildAttendanceSummary(query domain.AttendanceSummaryQuery, dailies []domain.DailyAttendance) domain.AttendanceSummary {
+	users := make(map[string]struct{})
+	summary := domain.AttendanceSummary{
+		StartDate: query.StartDate,
+		EndDate:   query.EndDate,
+	}
+
+	for _, daily := range dailies {
+		if daily.UserID != "" {
+			users[daily.UserID] = struct{}{}
+		}
+		addDailyAttendanceStats(&summary.Stats, daily)
+	}
+
+	summary.UserCount = len(users)
+	return summary
+}
+
+func filterAttendanceExceptions(dailies []domain.DailyAttendance) []domain.DailyAttendance {
+	exceptions := make([]domain.DailyAttendance, 0)
+	for _, daily := range dailies {
+		if daily.IsAbnormal() {
+			exceptions = append(exceptions, daily)
+		}
+	}
+
+	return exceptions
+}
+
+func addDailyAttendanceStats(stats *domain.AttendanceStats, daily domain.DailyAttendance) {
+	stats.TotalDays++
+	stats.RecordCount += daily.RecordCount
+	stats.SnapshotCount += daily.SnapshotCount
+	stats.TotalLateDuration += daily.LateDuration
+	stats.TotalEarlyLeaveDuration += daily.EarlyLeaveDuration
+
+	if daily.Status == domain.DailyAttendanceStatusNormal {
+		stats.NormalDays++
+	} else if daily.IsAbnormal() {
+		stats.AbnormalDays++
+	}
+
+	if daily.Status == domain.DailyAttendanceStatusLateAndEarlyLeave {
+		stats.LateAndEarlyLeaveDays++
+	}
+	if daily.HasException(domain.DailyAttendanceExceptionLate) {
+		stats.LateDays++
+	}
+	if daily.HasException(domain.DailyAttendanceExceptionEarlyLeave) {
+		stats.EarlyLeaveDays++
+	}
+	if daily.HasException(domain.DailyAttendanceExceptionMissingCheckIn) {
+		stats.MissingCheckInDays++
+	}
+	if daily.HasException(domain.DailyAttendanceExceptionMissingCheckOut) {
+		stats.MissingCheckOutDays++
+	}
+	if daily.HasException(domain.DailyAttendanceExceptionAbsent) {
+		stats.AbsentDays++
+	}
 }
 
 func newDailyAttendanceAggregate(date time.Time, userID string, userName string, deviceSN string) *dailyAttendanceAggregate {
@@ -490,8 +750,34 @@ func paginateDailyAttendance(dailies []domain.DailyAttendance, limit int, offset
 	return dailies[offset:end]
 }
 
+func paginateMonthlyAttendance(records []domain.MonthlyAttendance, limit int, offset int) []domain.MonthlyAttendance {
+	if offset >= len(records) {
+		return []domain.MonthlyAttendance{}
+	}
+
+	end := offset + limit
+	if end > len(records) {
+		end = len(records)
+	}
+
+	return records[offset:end]
+}
+
 func dailyAttendanceDateKey(date time.Time) string {
 	return startOfDay(date).Format("2006-01-02")
+}
+
+func firstDayOfMonth(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Time{}
+	}
+
+	value = value.In(value.Location())
+	return time.Date(value.Year(), value.Month(), 1, 0, 0, 0, 0, value.Location())
+}
+
+func lastDayOfMonth(value time.Time) time.Time {
+	return firstDayOfMonth(value).AddDate(0, 1, -1)
 }
 
 func startOfDay(value time.Time) time.Time {
