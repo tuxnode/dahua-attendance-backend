@@ -64,10 +64,10 @@ go run ./cmd/server -config configs/config.example.toml
 
 ### Docker 启动
 
-使用 [docker-compose.yml](docker-compose.yml) 启动应用与 MySQL，数据库会自动初始化：
+使用 [docker-compose.yml](docker-compose.yml) 启动应用与 MySQL，数据库会自动初始化。应用镜像从 GHCR 拉取 `ghcr.io/tuxnode/dahua-attendance-backend:latest`：
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 服务启动后监听 `http://127.0.0.1:8080`，健康检查为 `GET /healthz`。停止并清理：

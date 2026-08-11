@@ -1,11 +1,6 @@
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        GO_VERSION: "1.26.5"
-    image: dahua-attendance-backend:local
+    image: ghcr.io/tuxnode/dahua-attendance-backend:latest
     container_name: dahua-attendance-backend
     command: ["-config", "/app/configs/config.docker.toml"]
     depends_on:
