@@ -1,0 +1,431 @@
+# API 说明
+
+本文档描述当前 Gin HTTP 服务对设备和前端暴露的接口。默认服务地址为 `http://127.0.0.1:8080`，以实际配置文件中的 `http.addr` 为准。
+
+## 通用约定
+
+- 请求和响应编码使用 UTF-8。
+- 前端查询接口响应格式为 JSON。
+- 时间戳字段使用 Unix 秒。
+- 日期字段使用 `YYYY-MM-DD`，月份字段使用 `YYYY-MM`。
+- `limit` 默认 `100`，最大 `500`；`offset` 小于 `0` 时按 `0` 处理。
+- 日报、汇总、异常列表的日期范围最大为 `31` 天。
+
+错误响应格式：
+
+```json
+{
+  "code": "invalid_request",
+  "message": "date must use YYYY-MM-DD format"
+}
+```
+
+常见状态码：
+
+| HTTP 状态码 | 说明 |
+| --- | --- |
+| `200` | 请求成功。 |
+| `400` | 查询参数格式错误。 |
+| `500` | 服务未配置、数据库查询失败或业务处理失败。 |
+
+## 健康检查
+
+### `GET /healthz`
+
+用于探活。
+
+响应：
+
+```text
+ok
+```
+
+## 设备上报
+
+### `POST /`
+
+设备默认上报入口。
+
+### `POST /api/v1/device/events`
+
+设备上报入口，和 `POST /` 使用同一套处理逻辑。
+
+请求头：
+
+| Header | 必填 | 说明 |
+| --- | --- | --- |
+| `Content-Type` | 是 | 支持 `application/json`、`multipart/x-mixed-replace`、`multipart/form-data`。 |
+| `Content-Encoding` | 否 | 支持空值和 `deflate`。 |
+
+请求体由设备上报，支持：
+
+- `AccessControl`：通行记录，写入 `attendance_records`。
+- `DoorStatus`：门状态记录，写入 `door_status_records`。
+- multipart 抓拍报文：解析文本事件，并保存事件中的图片数量统计。
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "success"
+}
+```
+
+说明：设备报文解析失败时，服务仍会返回成功响应，避免设备持续重试；业务写库失败时返回 `500`。
+
+## 查询考勤原始记录
+
+### `GET /api/v1/attendance/records`
+
+查询已入库的通行记录。
+
+查询参数：
+
+| 参数 | 必填 | 格式 | 说明 |
+| --- | --- | --- | --- |
+| `user_id` | 否 | string | 用户 ID。 |
+| `device_sn` | 否 | string | 设备 SN。 |
+| `start_time` | 否 | Unix 秒 | 起始事件时间。 |
+| `end_time` | 否 | Unix 秒 | 结束事件时间，不能早于 `start_time`。 |
+| `limit` | 否 | int | 分页大小。 |
+| `offset` | 否 | int | 分页偏移。 |
+
+示例：
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/attendance/records?user_id=REDACTED_USER_ID&start_time=1786333800&end_time=1786420200"
+```
+
+响应：
+
+```json
+{
+  "records": [
+    {
+      "user_id": "REDACTED_USER_ID",
+      "user_name": "REDACTED_NAME",
+      "device_sn": "REDACTED_DEVICE_SN",
+      "direction": "Entry",
+      "method": 15,
+      "method_name": "face_open",
+      "status": 1,
+      "event_time": 1786333807,
+      "received_at": 1786333925,
+      "has_snapshot": true,
+      "snapshot_count": 1
+    }
+  ]
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `user_id` | string | 用户 ID。 |
+| `user_name` | string | 用户姓名。 |
+| `device_sn` | string | 设备 SN。 |
+| `direction` | string | 通行方向，例如 `Entry`、`Exit`。 |
+| `method` | int | 设备上报的开门方式编码。 |
+| `method_name` | string | 开门方式名称，例如 `card`、`password`、`face`、`button`、`face_open`、`unknown`。 |
+| `status` | int | 设备上报的通行状态，`1` 表示成功。 |
+| `event_time` | int | 事件发生时间，Unix 秒。 |
+| `received_at` | int | 服务接收时间，Unix 秒。 |
+| `has_snapshot` | bool | 是否包含抓拍图片。 |
+| `snapshot_count` | int | 抓拍图片数量。 |
+
+## 查询考勤日报
+
+### `GET /api/v1/attendance/daily`
+
+按考勤规则生成日报。日报会基于配置的时区、班次、周末、节假日、工作日覆盖和排班计算。
+
+查询参数：
+
+| 参数 | 必填 | 格式 | 说明 |
+| --- | --- | --- | --- |
+| `user_id` | 否 | string | 用户 ID。传入后，即使当天无记录也会返回缺勤或休息日结果。 |
+| `device_sn` | 否 | string | 设备 SN。 |
+| `date` | 否 | `YYYY-MM-DD` | 查询单日；不能和 `start_date`、`end_date` 同时使用。 |
+| `start_date` | 否 | `YYYY-MM-DD` | 起始日期。 |
+| `end_date` | 否 | `YYYY-MM-DD` | 结束日期，不能早于 `start_date`。 |
+| `limit` | 否 | int | 分页大小。 |
+| `offset` | 否 | int | 分页偏移。 |
+
+示例：
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/attendance/daily?user_id=REDACTED_USER_ID&date=2026-08-10"
+```
+
+响应：
+
+```json
+{
+  "records": [
+    {
+      "date": "2026-08-10",
+      "user_id": "REDACTED_USER_ID",
+      "user_name": "REDACTED_NAME",
+      "device_sn": "REDACTED_DEVICE_SN",
+      "shift_id": "day",
+      "shift_name": "Day Shift",
+      "is_workday": true,
+      "non_workday_reason": "",
+      "status": "late",
+      "exceptions": ["late"],
+      "is_abnormal": true,
+      "work_start_at": 1786323600,
+      "work_end_at": 1786356000,
+      "first_entry_at": 1786324500,
+      "last_exit_at": 1786356600,
+      "late_seconds": 900,
+      "early_leave_seconds": 0,
+      "record_count": 2,
+      "snapshot_count": 1
+    }
+  ]
+}
+```
+
+日报字段说明：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `date` | string | 考勤业务日期。 |
+| `user_id` | string | 用户 ID。 |
+| `user_name` | string | 用户姓名。 |
+| `device_sn` | string | 设备 SN。 |
+| `shift_id` | string | 命中的班次 ID。 |
+| `shift_name` | string | 命中的班次名称。 |
+| `is_workday` | bool | 是否为工作日。 |
+| `non_workday_reason` | string | 非工作日原因，例如 `weekend`、`holiday`、`scheduled_rest`。 |
+| `status` | string | 日报状态。 |
+| `exceptions` | string[] | 异常类型列表。 |
+| `is_abnormal` | bool | 是否异常；休息日不算异常。 |
+| `work_start_at` | int | 应上班时间，Unix 秒。 |
+| `work_end_at` | int | 应下班时间，Unix 秒。 |
+| `first_entry_at` | int | 当日首次入场时间，Unix 秒；无记录时为 `0`。 |
+| `last_exit_at` | int | 当日最后出场时间，Unix 秒；无记录时为 `0`。 |
+| `late_seconds` | int | 迟到秒数。 |
+| `early_leave_seconds` | int | 早退秒数。 |
+| `record_count` | int | 当日匹配到的通行记录数量。 |
+| `snapshot_count` | int | 当日抓拍图片数量。 |
+
+日报状态：
+
+| 状态 | 说明 |
+| --- | --- |
+| `normal` | 正常。 |
+| `late` | 迟到。 |
+| `early_leave` | 早退。 |
+| `late_and_early_leave` | 迟到且早退。 |
+| `missing_check_in` | 缺少上班打卡。 |
+| `missing_check_out` | 缺少下班打卡。 |
+| `absent` | 缺勤。 |
+| `rest_day` | 休息日。 |
+
+异常类型：
+
+| 异常 | 说明 |
+| --- | --- |
+| `late` | 迟到。 |
+| `early_leave` | 早退。 |
+| `missing_check_in` | 缺少上班打卡。 |
+| `missing_check_out` | 缺少下班打卡。 |
+| `absent` | 缺勤。 |
+
+## 查询考勤月报
+
+### `GET /api/v1/attendance/monthly`
+
+按用户聚合指定月份的考勤统计。
+
+查询参数：
+
+| 参数 | 必填 | 格式 | 说明 |
+| --- | --- | --- | --- |
+| `user_id` | 否 | string | 用户 ID。 |
+| `device_sn` | 否 | string | 设备 SN。 |
+| `month` | 否 | `YYYY-MM` | 查询月份；为空时使用当前月份。 |
+| `limit` | 否 | int | 分页大小。 |
+| `offset` | 否 | int | 分页偏移。 |
+
+示例：
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/attendance/monthly?month=2026-08"
+```
+
+响应：
+
+```json
+{
+  "records": [
+    {
+      "month": "2026-08",
+      "user_id": "REDACTED_USER_ID",
+      "user_name": "REDACTED_NAME",
+      "device_sn": "REDACTED_DEVICE_SN",
+      "stats": {
+        "total_days": 31,
+        "work_days": 21,
+        "rest_days": 10,
+        "normal_days": 18,
+        "abnormal_days": 3,
+        "late_days": 1,
+        "early_leave_days": 1,
+        "late_and_early_leave_days": 0,
+        "missing_check_in_days": 0,
+        "missing_check_out_days": 1,
+        "absent_days": 0,
+        "record_count": 42,
+        "snapshot_count": 20,
+        "total_late_seconds": 300,
+        "total_early_leave_seconds": 600
+      }
+    }
+  ]
+}
+```
+
+## 查询考勤汇总
+
+### `GET /api/v1/attendance/summary`
+
+聚合指定日期范围内的整体考勤统计。
+
+查询参数：
+
+| 参数 | 必填 | 格式 | 说明 |
+| --- | --- | --- | --- |
+| `user_id` | 否 | string | 用户 ID。 |
+| `device_sn` | 否 | string | 设备 SN。 |
+| `date` | 否 | `YYYY-MM-DD` | 查询单日；不能和 `start_date`、`end_date` 同时使用。 |
+| `start_date` | 否 | `YYYY-MM-DD` | 起始日期。 |
+| `end_date` | 否 | `YYYY-MM-DD` | 结束日期。 |
+
+示例：
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/attendance/summary?start_date=2026-08-01&end_date=2026-08-31"
+```
+
+响应：
+
+```json
+{
+  "summary": {
+    "start_date": "2026-08-01",
+    "end_date": "2026-08-31",
+    "user_count": 12,
+    "stats": {
+      "total_days": 372,
+      "work_days": 252,
+      "rest_days": 120,
+      "normal_days": 230,
+      "abnormal_days": 22,
+      "late_days": 8,
+      "early_leave_days": 4,
+      "late_and_early_leave_days": 1,
+      "missing_check_in_days": 3,
+      "missing_check_out_days": 6,
+      "absent_days": 2,
+      "record_count": 504,
+      "snapshot_count": 240,
+      "total_late_seconds": 3600,
+      "total_early_leave_seconds": 2400
+    }
+  }
+}
+```
+
+统计字段说明：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `total_days` | int | 聚合的日报条数。 |
+| `work_days` | int | 工作日天数。 |
+| `rest_days` | int | 休息日天数。 |
+| `normal_days` | int | 正常天数。 |
+| `abnormal_days` | int | 异常天数，不包含休息日。 |
+| `late_days` | int | 迟到天数。 |
+| `early_leave_days` | int | 早退天数。 |
+| `late_and_early_leave_days` | int | 迟到且早退天数。 |
+| `missing_check_in_days` | int | 缺少上班打卡天数。 |
+| `missing_check_out_days` | int | 缺少下班打卡天数。 |
+| `absent_days` | int | 缺勤天数。 |
+| `record_count` | int | 通行记录数量。 |
+| `snapshot_count` | int | 抓拍图片数量。 |
+| `total_late_seconds` | int | 总迟到秒数。 |
+| `total_early_leave_seconds` | int | 总早退秒数。 |
+
+## 查询考勤异常列表
+
+### `GET /api/v1/attendance/exceptions`
+
+返回指定日期范围内的异常日报，响应结构和日报接口一致。
+
+查询参数：
+
+| 参数 | 必填 | 格式 | 说明 |
+| --- | --- | --- | --- |
+| `user_id` | 否 | string | 用户 ID。 |
+| `device_sn` | 否 | string | 设备 SN。 |
+| `date` | 否 | `YYYY-MM-DD` | 查询单日；不能和 `start_date`、`end_date` 同时使用。 |
+| `start_date` | 否 | `YYYY-MM-DD` | 起始日期。 |
+| `end_date` | 否 | `YYYY-MM-DD` | 结束日期。 |
+| `limit` | 否 | int | 分页大小。 |
+| `offset` | 否 | int | 分页偏移。 |
+
+示例：
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/attendance/exceptions?start_date=2026-08-01&end_date=2026-08-31&limit=20"
+```
+
+响应：
+
+```json
+{
+  "records": [
+    {
+      "date": "2026-08-10",
+      "user_id": "REDACTED_USER_ID",
+      "user_name": "REDACTED_NAME",
+      "device_sn": "REDACTED_DEVICE_SN",
+      "shift_id": "day",
+      "shift_name": "Day Shift",
+      "is_workday": true,
+      "non_workday_reason": "",
+      "status": "missing_check_out",
+      "exceptions": ["missing_check_out"],
+      "is_abnormal": true,
+      "work_start_at": 1786323600,
+      "work_end_at": 1786356000,
+      "first_entry_at": 1786323300,
+      "last_exit_at": 0,
+      "late_seconds": 0,
+      "early_leave_seconds": 0,
+      "record_count": 1,
+      "snapshot_count": 1
+    }
+  ]
+}
+```
+
+## 参数校验规则
+
+- `start_time`、`end_time` 必须为正整数 Unix 秒。
+- `end_time` 不能早于 `start_time`。
+- `date` 不能和 `start_date`、`end_date` 同时传入。
+- `date`、`start_date`、`end_date` 必须使用 `YYYY-MM-DD`。
+- `end_date` 不能早于 `start_date`。
+- 日报、汇总、异常列表日期范围不能超过 `31` 天。
+- `month` 必须使用 `YYYY-MM`。
+- `limit`、`offset` 必须为整数。
+
+## 敏感信息
+
+接口字段中包含 `user_id`、`user_name`、`device_sn`，前端展示和日志采集需要按实际生产要求脱敏。服务内部日志不应输出真实姓名、用户 ID、设备 SN。
