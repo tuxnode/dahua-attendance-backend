@@ -291,7 +291,7 @@ func TestListDailyAttendanceReturnsNormal(t *testing.T) {
 	if repo.query.StartTime != date {
 		t.Fatalf("unexpected repository start time: %s", repo.query.StartTime)
 	}
-	if !repo.query.EndTime.Equal(date.AddDate(0, 0, 1).Add(-time.Nanosecond)) {
+	if !repo.query.EndTime.Equal(date.AddDate(0, 0, 2).Add(-time.Nanosecond)) {
 		t.Fatalf("unexpected repository end time: %s", repo.query.EndTime)
 	}
 }
@@ -434,6 +434,126 @@ func TestListDailyAttendanceRejectsInvalidQuery(t *testing.T) {
 	}
 }
 
+func TestListDailyAttendanceUsesWeekendHolidayAndWorkdayRules(t *testing.T) {
+	start := time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC)
+	rules := testAttendanceRules()
+	rules.WeekendDays = map[time.Weekday]bool{
+		time.Saturday: true,
+		time.Sunday:   true,
+	}
+	rules.Workdays = map[string]bool{
+		"2026-08-08": true,
+	}
+	rules.Holidays = map[string]string{
+		"2026-08-10": "holiday",
+	}
+
+	svc := service.New(&fakeRepository{}, service.WithLogger(discardLogger()), service.WithAttendanceRules(rules))
+
+	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
+		UserID:    "REDACTED_USER_ID",
+		StartDate: start,
+		EndDate:   start.AddDate(0, 0, 2),
+	})
+	if err != nil {
+		t.Fatalf("list daily attendance: %v", err)
+	}
+	if len(dailies) != 3 {
+		t.Fatalf("unexpected daily attendance length: %d", len(dailies))
+	}
+	if dailies[0].Status != domain.DailyAttendanceStatusRestDay || dailies[0].NonWorkdayReason != "holiday" {
+		t.Fatalf("unexpected holiday daily: %+v", dailies[0])
+	}
+	if dailies[1].Status != domain.DailyAttendanceStatusRestDay || dailies[1].NonWorkdayReason != "weekend" {
+		t.Fatalf("unexpected weekend daily: %+v", dailies[1])
+	}
+	if dailies[2].Status != domain.DailyAttendanceStatusAbsent || !dailies[2].IsWorkday {
+		t.Fatalf("unexpected workday daily: %+v", dailies[2])
+	}
+}
+
+func TestListDailyAttendanceUsesFlexibleAndGraceMinutes(t *testing.T) {
+	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+	rules := testAttendanceRules()
+	shift := rules.Shifts["day"]
+	shift.LateGrace = 5 * time.Minute
+	shift.EarlyLeaveGrace = 5 * time.Minute
+	shift.Flexible = 10 * time.Minute
+	rules.Shifts["day"] = shift
+
+	repo := &fakeRepository{
+		attendanceRecords: []domain.AttendanceRecord{
+			dailyRecord(date.Add(9*time.Hour+14*time.Minute), domain.AccessDirectionEntry),
+			dailyRecord(date.Add(17*time.Hour+56*time.Minute), domain.AccessDirectionExit),
+		},
+	}
+	svc := service.New(repo, service.WithLogger(discardLogger()), service.WithAttendanceRules(rules))
+
+	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
+		UserID:    "REDACTED_USER_ID",
+		StartDate: date,
+		EndDate:   date,
+	})
+	if err != nil {
+		t.Fatalf("list daily attendance: %v", err)
+	}
+	if len(dailies) != 1 {
+		t.Fatalf("unexpected daily attendance length: %d", len(dailies))
+	}
+	if dailies[0].Status != domain.DailyAttendanceStatusNormal {
+		t.Fatalf("unexpected status: %+v", dailies[0])
+	}
+}
+
+func TestListDailyAttendanceUsesScheduledNightShiftAcrossDays(t *testing.T) {
+	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+	rules := testAttendanceRules()
+	rules.Shifts["night"] = domain.AttendanceShift{
+		ID:              "night",
+		Name:            "Night Shift",
+		Start:           domain.ClockTime{Hour: 21},
+		End:             domain.ClockTime{Hour: 6},
+		LateGrace:       5 * time.Minute,
+		EarlyLeaveGrace: 5 * time.Minute,
+		Enabled:         true,
+	}
+	rules.Schedules = []domain.AttendanceSchedule{
+		{
+			UserID:  "REDACTED_USER_ID",
+			Date:    date,
+			ShiftID: "night",
+		},
+	}
+	repo := &fakeRepository{
+		attendanceRecords: []domain.AttendanceRecord{
+			dailyRecord(date.Add(21*time.Hour+3*time.Minute), domain.AccessDirectionEntry),
+			dailyRecord(date.AddDate(0, 0, 1).Add(5*time.Hour+58*time.Minute), domain.AccessDirectionExit),
+		},
+	}
+	svc := service.New(repo, service.WithLogger(discardLogger()), service.WithAttendanceRules(rules))
+
+	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
+		UserID:    "REDACTED_USER_ID",
+		StartDate: date,
+		EndDate:   date,
+	})
+	if err != nil {
+		t.Fatalf("list daily attendance: %v", err)
+	}
+	if len(dailies) != 1 {
+		t.Fatalf("unexpected daily attendance length: %d", len(dailies))
+	}
+	if dailies[0].Status != domain.DailyAttendanceStatusNormal {
+		t.Fatalf("unexpected status: %+v", dailies[0])
+	}
+	if dailies[0].ShiftID != "night" {
+		t.Fatalf("unexpected shift id: %s", dailies[0].ShiftID)
+	}
+	if !dailies[0].LastExitAt.Equal(date.AddDate(0, 0, 1).Add(5*time.Hour + 58*time.Minute)) {
+		t.Fatalf("unexpected last exit: %s", dailies[0].LastExitAt)
+	}
+}
+
 func TestListMonthlyAttendanceAggregatesUserStats(t *testing.T) {
 	month := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	repo := &fakeRepository{
@@ -564,6 +684,25 @@ func dailyRecord(eventTime time.Time, direction domain.AccessDirection) domain.A
 		Direction: direction,
 		Status:    1,
 		EventTime: eventTime,
+	}
+}
+
+func testAttendanceRules() domain.AttendanceRules {
+	return domain.AttendanceRules{
+		Location:       time.UTC,
+		DefaultShiftID: "day",
+		WeekendDays:    map[time.Weekday]bool{},
+		Holidays:       map[string]string{},
+		Workdays:       map[string]bool{},
+		Shifts: map[string]domain.AttendanceShift{
+			"day": {
+				ID:      "day",
+				Name:    "Day Shift",
+				Start:   domain.ClockTime{Hour: 9},
+				End:     domain.ClockTime{Hour: 18},
+				Enabled: true,
+			},
+		},
 	}
 }
 

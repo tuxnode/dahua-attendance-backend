@@ -20,14 +20,13 @@ const (
 	maxQueryLimit     = 500
 
 	maxDailyDateRangeDays = 31
-	defaultWorkStartHour  = 9
-	defaultWorkEndHour    = 18
 )
 
 type Service struct {
 	repository repository.Repository
 	logger     *slog.Logger
 	now        func() time.Time
+	rules      domain.AttendanceRules
 }
 
 type Option func(*Service)
@@ -37,6 +36,7 @@ func New(repository repository.Repository, opts ...Option) *Service {
 		repository: repository,
 		logger:     slog.Default(),
 		now:        time.Now,
+		rules:      domain.DefaultAttendanceRules(),
 	}
 
 	for _, opt := range opts {
@@ -59,6 +59,12 @@ func WithNow(now func() time.Time) Option {
 		if now != nil {
 			service.now = now
 		}
+	}
+}
+
+func WithAttendanceRules(rules domain.AttendanceRules) Option {
+	return func(service *Service) {
+		service.rules = normalizeAttendanceRules(rules)
 	}
 }
 
@@ -323,7 +329,7 @@ func (s *Service) listDailyAttendance(ctx context.Context, query domain.DailyAtt
 		return nil, fmt.Errorf("service: list daily attendance records: %w", err)
 	}
 
-	return buildDailyAttendance(query, records), nil
+	return buildDailyAttendance(query, records, s.rules), nil
 }
 
 func (s *Service) listDailyAttendanceRecords(ctx context.Context, query domain.DailyAttendanceQuery) ([]domain.AttendanceRecord, error) {
@@ -331,7 +337,7 @@ func (s *Service) listDailyAttendanceRecords(ctx context.Context, query domain.D
 		UserID:    query.UserID,
 		DeviceSN:  query.DeviceSN,
 		StartTime: query.StartDate,
-		EndTime:   endOfDay(query.EndDate),
+		EndTime:   endOfDay(query.EndDate).Add(24 * time.Hour),
 		Limit:     maxQueryLimit,
 	}
 
@@ -446,28 +452,38 @@ type dailyAttendanceKey struct {
 }
 
 type dailyAttendanceAggregate struct {
-	date          time.Time
-	userID        string
-	userName      string
-	deviceSN      string
-	workStartAt   time.Time
-	workEndAt     time.Time
-	firstEntryAt  time.Time
-	lastExitAt    time.Time
-	recordCount   int
-	snapshotCount int
+	date             time.Time
+	userID           string
+	userName         string
+	deviceSN         string
+	shiftID          string
+	shiftName        string
+	isWorkday        bool
+	nonWorkdayReason string
+	workStartAt      time.Time
+	workEndAt        time.Time
+	lateGrace        time.Duration
+	earlyLeaveGrace  time.Duration
+	flexible         time.Duration
+	firstEntryAt     time.Time
+	lastExitAt       time.Time
+	recordCount      int
+	snapshotCount    int
 }
 
-func buildDailyAttendance(query domain.DailyAttendanceQuery, records []domain.AttendanceRecord) []domain.DailyAttendance {
+func buildDailyAttendance(query domain.DailyAttendanceQuery, records []domain.AttendanceRecord, rules domain.AttendanceRules) []domain.DailyAttendance {
+	rules = normalizeAttendanceRules(rules)
+	startDate := attendanceDateInLocation(query.StartDate, rules.Location)
+	endDate := attendanceDateInLocation(query.EndDate, rules.Location)
 	aggregates := make(map[dailyAttendanceKey]*dailyAttendanceAggregate)
 
 	if query.UserID != "" {
-		for date := query.StartDate; !date.After(query.EndDate); date = date.AddDate(0, 0, 1) {
+		for date := startDate; !date.After(endDate); date = date.AddDate(0, 0, 1) {
 			key := dailyAttendanceKey{
 				date:   dailyAttendanceDateKey(date),
 				userID: query.UserID,
 			}
-			aggregates[key] = newDailyAttendanceAggregate(date, query.UserID, "", query.DeviceSN)
+			aggregates[key] = newDailyAttendanceAggregate(date, query.UserID, "", query.DeviceSN, resolveAttendanceDayRule(rules, date, query.UserID, query.DeviceSN))
 		}
 	}
 
@@ -483,8 +499,8 @@ func buildDailyAttendance(query domain.DailyAttendanceQuery, records []domain.At
 			continue
 		}
 
-		date := startOfDay(record.EventTime)
-		if date.Before(query.StartDate) || date.After(query.EndDate) {
+		date := attendanceDateForRecord(rules, startDate, endDate, record)
+		if date.IsZero() {
 			continue
 		}
 
@@ -494,7 +510,7 @@ func buildDailyAttendance(query domain.DailyAttendanceQuery, records []domain.At
 		}
 		aggregate := aggregates[key]
 		if aggregate == nil {
-			aggregate = newDailyAttendanceAggregate(date, userID, record.CardName, record.DeviceSN)
+			aggregate = newDailyAttendanceAggregate(date, userID, record.CardName, record.DeviceSN, resolveAttendanceDayRule(rules, date, userID, record.DeviceSN))
 			aggregates[key] = aggregate
 		}
 
@@ -595,6 +611,11 @@ func filterAttendanceExceptions(dailies []domain.DailyAttendance) []domain.Daily
 
 func addDailyAttendanceStats(stats *domain.AttendanceStats, daily domain.DailyAttendance) {
 	stats.TotalDays++
+	if daily.IsWorkday {
+		stats.WorkDays++
+	} else {
+		stats.RestDays++
+	}
 	stats.RecordCount += daily.RecordCount
 	stats.SnapshotCount += daily.SnapshotCount
 	stats.TotalLateDuration += daily.LateDuration
@@ -626,16 +647,244 @@ func addDailyAttendanceStats(stats *domain.AttendanceStats, daily domain.DailyAt
 	}
 }
 
-func newDailyAttendanceAggregate(date time.Time, userID string, userName string, deviceSN string) *dailyAttendanceAggregate {
+func normalizeAttendanceRules(rules domain.AttendanceRules) domain.AttendanceRules {
+	defaultRules := domain.DefaultAttendanceRules()
+	if rules.Location == nil {
+		rules.Location = defaultRules.Location
+	}
+	if strings.TrimSpace(rules.DefaultShiftID) == "" {
+		rules.DefaultShiftID = defaultRules.DefaultShiftID
+	}
+	if len(rules.Shifts) == 0 {
+		rules.Shifts = defaultRules.Shifts
+	}
+	if rules.WeekendDays == nil {
+		rules.WeekendDays = make(map[time.Weekday]bool)
+	}
+	if rules.Holidays == nil {
+		rules.Holidays = make(map[string]string)
+	}
+	if rules.Workdays == nil {
+		rules.Workdays = make(map[string]bool)
+	}
+
+	normalizedShifts := make(map[string]domain.AttendanceShift, len(rules.Shifts))
+	for id, shift := range rules.Shifts {
+		shift.ID = strings.TrimSpace(shift.ID)
+		if shift.ID == "" {
+			shift.ID = strings.TrimSpace(id)
+		}
+		if shift.ID == "" || !shift.Enabled {
+			continue
+		}
+		if strings.TrimSpace(shift.Name) == "" {
+			shift.Name = shift.ID
+		}
+		normalizedShifts[shift.ID] = shift
+	}
+	if len(normalizedShifts) == 0 {
+		normalizedShifts = defaultRules.Shifts
+	}
+	rules.Shifts = normalizedShifts
+	if _, ok := rules.Shifts[rules.DefaultShiftID]; !ok {
+		for id := range rules.Shifts {
+			rules.DefaultShiftID = id
+			break
+		}
+	}
+
+	return rules
+}
+
+func resolveAttendanceDayRule(rules domain.AttendanceRules, date time.Time, userID string, deviceSN string) domain.AttendanceDayRule {
+	rules = normalizeAttendanceRules(rules)
+	date = attendanceDateInLocation(date, rules.Location)
+	userID = strings.TrimSpace(userID)
+	deviceSN = strings.TrimSpace(deviceSN)
+
+	if schedule, ok := resolveDateSchedule(rules.Schedules, date, userID, deviceSN); ok {
+		return attendanceRuleFromSchedule(rules, date, schedule.ShiftID, schedule.Rest, schedule.Reason)
+	}
+	if schedule, ok := resolveWeeklySchedule(rules.WeeklySchedules, date, userID, deviceSN); ok {
+		return attendanceRuleFromSchedule(rules, date, schedule.ShiftID, schedule.Rest, schedule.Reason)
+	}
+
+	dateKey := dailyAttendanceDateKey(date)
+	if rules.Workdays[dateKey] {
+		return domain.AttendanceDayRule{
+			Date:      date,
+			Shift:     resolveAttendanceShift(rules, rules.DefaultShiftID),
+			IsWorkday: true,
+		}
+	}
+	if reason, ok := rules.Holidays[dateKey]; ok {
+		if reason == "" {
+			reason = "holiday"
+		}
+		return domain.AttendanceDayRule{
+			Date:             date,
+			Shift:            resolveAttendanceShift(rules, rules.DefaultShiftID),
+			IsWorkday:        false,
+			NonWorkdayReason: reason,
+		}
+	}
+	if rules.WeekendDays[date.Weekday()] {
+		return domain.AttendanceDayRule{
+			Date:             date,
+			Shift:            resolveAttendanceShift(rules, rules.DefaultShiftID),
+			IsWorkday:        false,
+			NonWorkdayReason: "weekend",
+		}
+	}
+
+	return domain.AttendanceDayRule{
+		Date:      date,
+		Shift:     resolveAttendanceShift(rules, rules.DefaultShiftID),
+		IsWorkday: true,
+	}
+}
+
+func attendanceDateForRecord(rules domain.AttendanceRules, startDate time.Time, endDate time.Time, record domain.AttendanceRecord) time.Time {
+	rules = normalizeAttendanceRules(rules)
+	startDate = attendanceDateInLocation(startDate, rules.Location)
+	endDate = attendanceDateInLocation(endDate, rules.Location)
+	eventTime := record.EventTime
+	if rules.Location != nil {
+		eventTime = eventTime.In(rules.Location)
+	}
+	eventDate := startOfDay(eventTime)
+	previousDate := eventDate.AddDate(0, 0, -1)
+
+	for _, date := range []time.Time{previousDate, eventDate} {
+		if date.Before(startDate) || date.After(endDate) {
+			continue
+		}
+		rule := resolveAttendanceDayRule(rules, date, record.UserID, record.DeviceSN)
+		if !rule.IsWorkday {
+			continue
+		}
+		workStartAt := rule.Shift.WorkStartAt(date)
+		workEndAt := rule.Shift.WorkEndAt(date)
+		if workEndAt.After(endOfDay(date)) && !eventTime.Before(workStartAt) && !eventTime.After(workEndAt) {
+			return date
+		}
+	}
+
+	if eventDate.Before(startDate) || eventDate.After(endDate) {
+		return time.Time{}
+	}
+
+	return eventDate
+}
+
+func attendanceRuleFromSchedule(rules domain.AttendanceRules, date time.Time, shiftID string, rest bool, reason string) domain.AttendanceDayRule {
+	if rest {
+		if reason == "" {
+			reason = "scheduled_rest"
+		}
+		return domain.AttendanceDayRule{
+			Date:             date,
+			Shift:            resolveAttendanceShift(rules, rules.DefaultShiftID),
+			IsWorkday:        false,
+			NonWorkdayReason: reason,
+		}
+	}
+
+	return domain.AttendanceDayRule{
+		Date:      date,
+		Shift:     resolveAttendanceShift(rules, shiftID),
+		IsWorkday: true,
+	}
+}
+
+func resolveAttendanceShift(rules domain.AttendanceRules, shiftID string) domain.AttendanceShift {
+	shiftID = strings.TrimSpace(shiftID)
+	if shiftID != "" {
+		if shift, ok := rules.Shifts[shiftID]; ok {
+			return shift
+		}
+	}
+	if shift, ok := rules.Shifts[rules.DefaultShiftID]; ok {
+		return shift
+	}
+
+	return domain.DefaultAttendanceRules().Shifts[domain.DefaultAttendanceShiftID]
+}
+
+func resolveDateSchedule(schedules []domain.AttendanceSchedule, date time.Time, userID string, deviceSN string) (domain.AttendanceSchedule, bool) {
+	var matched domain.AttendanceSchedule
+	bestScore := -1
+	dateKey := dailyAttendanceDateKey(date)
+	for _, schedule := range schedules {
+		if dailyAttendanceDateKey(schedule.Date) != dateKey {
+			continue
+		}
+		score, ok := scheduleMatchScore(schedule.UserID, schedule.DeviceSN, userID, deviceSN)
+		if ok && score > bestScore {
+			matched = schedule
+			bestScore = score
+		}
+	}
+
+	return matched, bestScore >= 0
+}
+
+func resolveWeeklySchedule(schedules []domain.AttendanceWeeklySchedule, date time.Time, userID string, deviceSN string) (domain.AttendanceWeeklySchedule, bool) {
+	var matched domain.AttendanceWeeklySchedule
+	bestScore := -1
+	for _, schedule := range schedules {
+		if schedule.Weekday != date.Weekday() {
+			continue
+		}
+		score, ok := scheduleMatchScore(schedule.UserID, schedule.DeviceSN, userID, deviceSN)
+		if ok && score > bestScore {
+			matched = schedule
+			bestScore = score
+		}
+	}
+
+	return matched, bestScore >= 0
+}
+
+func scheduleMatchScore(scheduleUserID string, scheduleDeviceSN string, userID string, deviceSN string) (int, bool) {
+	score := 0
+	scheduleUserID = strings.TrimSpace(scheduleUserID)
+	scheduleDeviceSN = strings.TrimSpace(scheduleDeviceSN)
+	if scheduleUserID != "" {
+		if scheduleUserID != userID {
+			return 0, false
+		}
+		score += 2
+	}
+	if scheduleDeviceSN != "" {
+		if scheduleDeviceSN != deviceSN {
+			return 0, false
+		}
+		score++
+	}
+
+	return score, true
+}
+
+func newDailyAttendanceAggregate(date time.Time, userID string, userName string, deviceSN string, rule domain.AttendanceDayRule) *dailyAttendanceAggregate {
 	date = startOfDay(date)
+	workStartAt := rule.Shift.WorkStartAt(date)
+	workEndAt := rule.Shift.WorkEndAt(date)
 
 	return &dailyAttendanceAggregate{
-		date:        date,
-		userID:      userID,
-		userName:    userName,
-		deviceSN:    deviceSN,
-		workStartAt: time.Date(date.Year(), date.Month(), date.Day(), defaultWorkStartHour, 0, 0, 0, date.Location()),
-		workEndAt:   time.Date(date.Year(), date.Month(), date.Day(), defaultWorkEndHour, 0, 0, 0, date.Location()),
+		date:             date,
+		userID:           userID,
+		userName:         userName,
+		deviceSN:         deviceSN,
+		shiftID:          rule.Shift.ID,
+		shiftName:        rule.Shift.Name,
+		isWorkday:        rule.IsWorkday,
+		nonWorkdayReason: rule.NonWorkdayReason,
+		workStartAt:      workStartAt,
+		workEndAt:        workEndAt,
+		lateGrace:        rule.Shift.LateGrace,
+		earlyLeaveGrace:  rule.Shift.EarlyLeaveGrace,
+		flexible:         rule.Shift.Flexible,
 	}
 }
 
@@ -674,6 +923,10 @@ func (a *dailyAttendanceAggregate) dailyAttendance() domain.DailyAttendance {
 		UserID:             a.userID,
 		UserName:           a.userName,
 		DeviceSN:           a.deviceSN,
+		ShiftID:            a.shiftID,
+		ShiftName:          a.shiftName,
+		IsWorkday:          a.isWorkday,
+		NonWorkdayReason:   a.nonWorkdayReason,
 		Status:             status,
 		Exceptions:         exceptions,
 		WorkStartAt:        a.workStartAt,
@@ -693,6 +946,10 @@ func evaluateDailyAttendanceStatus(aggregate dailyAttendanceAggregate) (
 	time.Duration,
 	time.Duration,
 ) {
+	if !aggregate.isWorkday {
+		return domain.DailyAttendanceStatusRestDay, nil, 0, 0
+	}
+
 	if aggregate.firstEntryAt.IsZero() && aggregate.lastExitAt.IsZero() {
 		return domain.DailyAttendanceStatusAbsent,
 			[]domain.DailyAttendanceException{domain.DailyAttendanceExceptionAbsent},
@@ -714,13 +971,15 @@ func evaluateDailyAttendanceStatus(aggregate dailyAttendanceAggregate) (
 
 	exceptions := make([]domain.DailyAttendanceException, 0, 2)
 	lateDuration := time.Duration(0)
-	if aggregate.firstEntryAt.After(aggregate.workStartAt) {
+	latestStart := aggregate.workStartAt.Add(aggregate.lateGrace).Add(aggregate.flexible)
+	if aggregate.firstEntryAt.After(latestStart) {
 		lateDuration = aggregate.firstEntryAt.Sub(aggregate.workStartAt)
 		exceptions = append(exceptions, domain.DailyAttendanceExceptionLate)
 	}
 
 	earlyLeaveDuration := time.Duration(0)
-	if aggregate.lastExitAt.Before(aggregate.workEndAt) {
+	earliestEnd := aggregate.workEndAt.Add(-aggregate.earlyLeaveGrace)
+	if aggregate.lastExitAt.Before(earliestEnd) {
 		earlyLeaveDuration = aggregate.workEndAt.Sub(aggregate.lastExitAt)
 		exceptions = append(exceptions, domain.DailyAttendanceExceptionEarlyLeave)
 	}
@@ -765,6 +1024,17 @@ func paginateMonthlyAttendance(records []domain.MonthlyAttendance, limit int, of
 
 func dailyAttendanceDateKey(date time.Time) string {
 	return startOfDay(date).Format("2006-01-02")
+}
+
+func attendanceDateInLocation(date time.Time, location *time.Location) time.Time {
+	if date.IsZero() {
+		return time.Time{}
+	}
+	if location == nil {
+		return startOfDay(date)
+	}
+
+	return time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, location)
 }
 
 func firstDayOfMonth(value time.Time) time.Time {

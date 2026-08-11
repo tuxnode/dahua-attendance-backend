@@ -547,6 +547,10 @@ func toDailyAttendanceDTO(record domain.DailyAttendance) attendancev1.DailyAtten
 		UserID:            record.UserID,
 		UserName:          record.UserName,
 		DeviceSN:          record.DeviceSN,
+		ShiftID:           record.ShiftID,
+		ShiftName:         record.ShiftName,
+		IsWorkday:         record.IsWorkday,
+		NonWorkdayReason:  record.NonWorkdayReason,
 		Status:            record.Status.String(),
 		Exceptions:        dailyAttendanceExceptions(record.Exceptions),
 		IsAbnormal:        record.IsAbnormal(),
@@ -592,6 +596,8 @@ func toAttendanceSummaryDTO(summary domain.AttendanceSummary) attendancev1.Atten
 func toAttendanceStatsDTO(stats domain.AttendanceStats) attendancev1.AttendanceStatsDTO {
 	return attendancev1.AttendanceStatsDTO{
 		TotalDays:              stats.TotalDays,
+		WorkDays:               stats.WorkDays,
+		RestDays:               stats.RestDays,
 		NormalDays:             stats.NormalDays,
 		AbnormalDays:           stats.AbnormalDays,
 		LateDays:               stats.LateDays,

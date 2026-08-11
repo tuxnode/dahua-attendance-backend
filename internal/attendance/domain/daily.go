@@ -12,6 +12,7 @@ const (
 	DailyAttendanceStatusMissingCheckIn    DailyAttendanceStatus = "missing_check_in"
 	DailyAttendanceStatusMissingCheckOut   DailyAttendanceStatus = "missing_check_out"
 	DailyAttendanceStatusAbsent            DailyAttendanceStatus = "absent"
+	DailyAttendanceStatusRestDay           DailyAttendanceStatus = "rest_day"
 	DailyAttendanceStatusUnknown           DailyAttendanceStatus = "unknown"
 )
 
@@ -71,6 +72,10 @@ type DailyAttendance struct {
 	UserID             string
 	UserName           string
 	DeviceSN           string
+	ShiftID            string
+	ShiftName          string
+	IsWorkday          bool
+	NonWorkdayReason   string
 	Status             DailyAttendanceStatus
 	Exceptions         []DailyAttendanceException
 	WorkStartAt        time.Time
@@ -100,6 +105,8 @@ type AttendanceSummary struct {
 
 type AttendanceStats struct {
 	TotalDays               int
+	WorkDays                int
+	RestDays                int
 	NormalDays              int
 	AbnormalDays            int
 	LateDays                int
@@ -115,7 +122,9 @@ type AttendanceStats struct {
 }
 
 func (a DailyAttendance) IsAbnormal() bool {
-	return a.Status != "" && a.Status != DailyAttendanceStatusNormal
+	return a.Status != "" &&
+		a.Status != DailyAttendanceStatusNormal &&
+		a.Status != DailyAttendanceStatusRestDay
 }
 
 func (a DailyAttendance) HasException(exception DailyAttendanceException) bool {

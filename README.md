@@ -6,7 +6,7 @@
 
 ## 项目状态
 
-当前已完成设备 HTTP 上报接入、JSON/multipart 解析、考勤记录与门状态记录入库、基础去重、配置文件启动、Gin HTTP API、考勤日报/月报/汇总/异常列表查询，以及 Nacos SDK 服务注册入口。
+当前已完成设备 HTTP 上报接入、JSON/multipart 解析、考勤记录与门状态记录入库、基础去重、配置文件启动、Gin HTTP API、考勤日报/月报/汇总/异常列表查询、考勤班次与规则配置，以及 Nacos SDK 服务注册入口。
 
 ## 技术栈
 
@@ -133,6 +133,51 @@ file_path = ""
 `log.file_path` 为空时日志输出到标准输出。配置文件缺失、`app.name` 为空、`database.dsn` 为空或日志级别非法时，服务会启动失败。
 
 `[nacos]` 为可选配置段。未配置 `[nacos]` 或 `nacos.enabled = false` 时，服务不会创建 Nacos SDK client，也不会连接或注册到 Nacos。启用 Nacos 注册时，将 `nacos.enabled` 设置为 `true`，并填写前端或网关可访问的 `nacos.ip` 和 `nacos.port`。
+
+`[attendance]` 用于配置考勤规则：
+
+```toml
+[attendance]
+timezone = "Asia/Shanghai"
+default_shift_id = "day"
+weekend_days = ["saturday", "sunday"]
+workdays = ["2026-09-26"]
+
+[[attendance.holidays]]
+date = "2026-10-01"
+name = "national_day"
+
+[[attendance.shifts]]
+id = "day"
+name = "Day Shift"
+start_time = "09:00"
+end_time = "18:00"
+late_grace_minutes = 5
+early_leave_grace_minutes = 5
+flexible_minutes = 10
+enabled = true
+
+[[attendance.shifts]]
+id = "night"
+name = "Night Shift"
+start_time = "21:00"
+end_time = "06:00"
+late_grace_minutes = 5
+early_leave_grace_minutes = 5
+flexible_minutes = 0
+enabled = true
+
+[[attendance.schedules]]
+user_id = "REDACTED_USER_ID"
+date = "2026-08-10"
+shift_id = "night"
+
+[[attendance.weekly_schedules]]
+weekday = "monday"
+shift_id = "day"
+```
+
+`timezone` 决定日报、月报、汇总和异常统计使用的业务时区。`weekend_days`、`workdays`、`holidays` 用于覆盖默认周末规则。`shifts` 定义班次上下班时间、迟到/早退宽限和弹性打卡。`schedules` 与 `weekly_schedules` 用于指定某人、某设备或某周几对应的班次，支持多班次/排班。
 
 ### 检查工程
 

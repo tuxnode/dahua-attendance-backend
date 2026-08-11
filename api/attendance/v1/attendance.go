@@ -84,6 +84,10 @@ type DailyAttendanceDTO struct {
 	UserID            string   `json:"user_id"`
 	UserName          string   `json:"user_name"`
 	DeviceSN          string   `json:"device_sn"`
+	ShiftID           string   `json:"shift_id"`
+	ShiftName         string   `json:"shift_name"`
+	IsWorkday         bool     `json:"is_workday"`
+	NonWorkdayReason  string   `json:"non_workday_reason"`
 	Status            string   `json:"status"`
 	Exceptions        []string `json:"exceptions"`
 	IsAbnormal        bool     `json:"is_abnormal"`
@@ -114,6 +118,8 @@ type AttendanceSummaryDTO struct {
 
 type AttendanceStatsDTO struct {
 	TotalDays              int   `json:"total_days"`
+	WorkDays               int   `json:"work_days"`
+	RestDays               int   `json:"rest_days"`
 	NormalDays             int   `json:"normal_days"`
 	AbnormalDays           int   `json:"abnormal_days"`
 	LateDays               int   `json:"late_days"`
