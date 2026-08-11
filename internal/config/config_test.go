@@ -154,6 +154,9 @@ dsn = "user:password@tcp(127.0.0.1:3306)/attendance?parseTime=true"
 	if cfg.Log.Level != "info" {
 		t.Fatalf("unexpected log level: %s", cfg.Log.Level)
 	}
+	if cfg.Nacos.Enabled {
+		t.Fatal("expected nacos to be disabled by default")
+	}
 	if cfg.Nacos.ServiceName != "attendance" {
 		t.Fatalf("unexpected nacos service name: %s", cfg.Nacos.ServiceName)
 	}

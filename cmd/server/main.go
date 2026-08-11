@@ -57,14 +57,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	registry, err := nacosregistry.NewRegistry(cfg.Nacos, logger)
-	if err != nil {
-		logger.Error("create nacos registry failed", "error", err)
-		os.Exit(1)
-	}
-	if err := registry.Register(context.Background()); err != nil {
-		logger.Error("register nacos instance failed", "error", err)
-		os.Exit(1)
+	var registry *nacosregistry.Registry
+	if cfg.Nacos.Enabled {
+		registry, err = nacosregistry.NewRegistry(cfg.Nacos, logger)
+		if err != nil {
+			logger.Error("create nacos registry failed", "error", err)
+			os.Exit(1)
+		}
+		if err := registry.Register(context.Background()); err != nil {
+			logger.Error("register nacos instance failed", "error", err)
+			os.Exit(1)
+		}
+	} else {
+		logger.Info("nacos registry disabled")
 	}
 
 	errCh := make(chan error, 1)

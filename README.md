@@ -88,6 +88,7 @@ max_idle_conns = 5
 conn_max_lifetime = "30m"
 connect_timeout = "5s"
 
+# Nacos is optional. Remove this section or keep enabled = false to run without Nacos.
 [nacos]
 enabled = false
 address = "127.0.0.1:8848"
@@ -113,7 +114,7 @@ file_path = ""
 
 `log.file_path` 为空时日志输出到标准输出。配置文件缺失、`app.name` 为空、`database.dsn` 为空或日志级别非法时，服务会启动失败。
 
-启用 Nacos 注册时，将 `nacos.enabled` 设置为 `true`，并填写前端或网关可访问的 `nacos.ip` 和 `nacos.port`。
+`[nacos]` 为可选配置段。未配置 `[nacos]` 或 `nacos.enabled = false` 时，服务不会创建 Nacos SDK client，也不会连接或注册到 Nacos。启用 Nacos 注册时，将 `nacos.enabled` 设置为 `true`，并填写前端或网关可访问的 `nacos.ip` 和 `nacos.port`。
 
 ### 检查工程
 
@@ -208,7 +209,7 @@ offset
 
 ## 服务注册
 
-启用 `nacos.enabled` 后，服务会通过 Nacos Go SDK 注册当前 Gin HTTP 服务实例。Nacos 仅用于服务注册与发现。
+启用 `nacos.enabled` 后，服务会通过 Nacos Go SDK 注册当前 Gin HTTP 服务实例。未启用或未配置 `[nacos]` 时会跳过 Nacos 连接。Nacos 仅用于服务注册与发现。
 
 ## 开发说明
 
