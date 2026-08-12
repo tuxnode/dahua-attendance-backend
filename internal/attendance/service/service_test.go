@@ -19,8 +19,16 @@ import (
 type fakeRepository struct {
 	attendanceRecords []domain.AttendanceRecord
 	doorStatusRecords []domain.DoorStatusRecord
+	settings          domain.AttendanceSettings
+	shifts            []domain.AttendanceShift
+	calendarDays      []domain.AttendanceCalendarDay
+	schedules         []domain.ManagedAttendanceSchedule
+	weeklySchedules   []domain.ManagedAttendanceWeeklySchedule
 	query             domain.AttendanceRecordQuery
+	calendarDayQuery  domain.AttendanceCalendarDayQuery
+	scheduleQuery     domain.AttendanceScheduleQuery
 	err               error
+	settingsErr       error
 }
 
 func (r *fakeRepository) SaveAttendanceRecord(_ context.Context, record domain.AttendanceRecord) error {
@@ -48,7 +56,13 @@ func (r *fakeRepository) ListAttendanceRecords(_ context.Context, query domain.A
 }
 
 func (r *fakeRepository) GetAttendanceSettings(_ context.Context) (domain.AttendanceSettings, error) {
-	return domain.AttendanceSettings{}, sql.ErrNoRows
+	if r.settingsErr != nil {
+		return domain.AttendanceSettings{}, r.settingsErr
+	}
+	if r.settings.Timezone == "" && r.settings.DefaultShiftID == "" && len(r.settings.WeekendDays) == 0 {
+		return domain.AttendanceSettings{}, sql.ErrNoRows
+	}
+	return r.settings, nil
 }
 
 func (r *fakeRepository) SaveAttendanceSettings(_ context.Context, _ domain.AttendanceSettings) error {
@@ -56,7 +70,7 @@ func (r *fakeRepository) SaveAttendanceSettings(_ context.Context, _ domain.Atte
 }
 
 func (r *fakeRepository) ListAttendanceShifts(_ context.Context, _ domain.AttendanceShiftQuery) ([]domain.AttendanceShift, error) {
-	return nil, nil
+	return append([]domain.AttendanceShift(nil), r.shifts...), nil
 }
 
 func (r *fakeRepository) SaveAttendanceShift(_ context.Context, _ domain.AttendanceShift) error {
@@ -67,8 +81,9 @@ func (r *fakeRepository) DeleteAttendanceShift(_ context.Context, _ string) erro
 	return nil
 }
 
-func (r *fakeRepository) ListAttendanceCalendarDays(_ context.Context, _ domain.AttendanceCalendarDayQuery) ([]domain.AttendanceCalendarDay, error) {
-	return nil, nil
+func (r *fakeRepository) ListAttendanceCalendarDays(_ context.Context, query domain.AttendanceCalendarDayQuery) ([]domain.AttendanceCalendarDay, error) {
+	r.calendarDayQuery = query
+	return append([]domain.AttendanceCalendarDay(nil), r.calendarDays...), nil
 }
 
 func (r *fakeRepository) SaveAttendanceCalendarDay(_ context.Context, _ domain.AttendanceCalendarDay) error {
@@ -79,8 +94,9 @@ func (r *fakeRepository) DeleteAttendanceCalendarDay(_ context.Context, _ time.T
 	return nil
 }
 
-func (r *fakeRepository) ListAttendanceSchedules(_ context.Context, _ domain.AttendanceScheduleQuery) ([]domain.ManagedAttendanceSchedule, error) {
-	return nil, nil
+func (r *fakeRepository) ListAttendanceSchedules(_ context.Context, query domain.AttendanceScheduleQuery) ([]domain.ManagedAttendanceSchedule, error) {
+	r.scheduleQuery = query
+	return append([]domain.ManagedAttendanceSchedule(nil), r.schedules...), nil
 }
 
 func (r *fakeRepository) SaveAttendanceSchedule(_ context.Context, schedule domain.ManagedAttendanceSchedule) (domain.ManagedAttendanceSchedule, error) {
@@ -92,7 +108,7 @@ func (r *fakeRepository) DeleteAttendanceSchedule(_ context.Context, _ int64) er
 }
 
 func (r *fakeRepository) ListAttendanceWeeklySchedules(_ context.Context, _ domain.AttendanceWeeklyScheduleQuery) ([]domain.ManagedAttendanceWeeklySchedule, error) {
-	return nil, nil
+	return append([]domain.ManagedAttendanceWeeklySchedule(nil), r.weeklySchedules...), nil
 }
 
 func (r *fakeRepository) SaveAttendanceWeeklySchedule(_ context.Context, schedule domain.ManagedAttendanceWeeklySchedule) (domain.ManagedAttendanceWeeklySchedule, error) {
@@ -526,6 +542,83 @@ func TestListDailyAttendanceUsesWeekendHolidayAndWorkdayRules(t *testing.T) {
 	}
 	if dailies[2].Status != domain.DailyAttendanceStatusAbsent || !dailies[2].IsWorkday {
 		t.Fatalf("unexpected workday daily: %+v", dailies[2])
+	}
+}
+
+func TestListDailyAttendanceUsesRepositoryRules(t *testing.T) {
+	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+	repo := &fakeRepository{
+		settings: domain.AttendanceSettings{
+			Timezone:       "UTC",
+			DefaultShiftID: "day",
+			WeekendDays:    []time.Weekday{time.Saturday, time.Sunday},
+		},
+		shifts: []domain.AttendanceShift{
+			{
+				ID:      "day",
+				Name:    "Day Shift",
+				Start:   domain.ClockTime{Hour: 9},
+				End:     domain.ClockTime{Hour: 18},
+				Enabled: true,
+			},
+			{
+				ID:      "night",
+				Name:    "Night Shift",
+				Start:   domain.ClockTime{Hour: 21},
+				End:     domain.ClockTime{Hour: 6},
+				Enabled: true,
+			},
+		},
+		calendarDays: []domain.AttendanceCalendarDay{
+			{
+				Date:    date.AddDate(0, 0, 1),
+				DayType: domain.CalendarDayTypeHoliday,
+				Name:    "company_holiday",
+			},
+		},
+		schedules: []domain.ManagedAttendanceSchedule{
+			{
+				UserID:  "REDACTED_USER_ID",
+				Date:    date,
+				ShiftID: "night",
+				Enabled: true,
+			},
+		},
+		attendanceRecords: []domain.AttendanceRecord{
+			dailyRecord(date.Add(21*time.Hour), domain.AccessDirectionEntry),
+			dailyRecord(date.AddDate(0, 0, 1).Add(6*time.Hour), domain.AccessDirectionExit),
+		},
+	}
+	svc := service.New(repo, service.WithLogger(discardLogger()))
+
+	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
+		UserID:    "REDACTED_USER_ID",
+		StartDate: date,
+		EndDate:   date.AddDate(0, 0, 1),
+	})
+	if err != nil {
+		t.Fatalf("list daily attendance: %v", err)
+	}
+	if len(dailies) != 2 {
+		t.Fatalf("unexpected daily attendance length: %d", len(dailies))
+	}
+	if repo.calendarDayQuery.StartDate.Format("2006-01-02") != "2026-08-10" ||
+		repo.calendarDayQuery.EndDate.Format("2006-01-02") != "2026-08-11" {
+		t.Fatalf("unexpected calendar day query: %+v", repo.calendarDayQuery)
+	}
+	if repo.scheduleQuery.StartDate.Format("2006-01-02") != "2026-08-10" ||
+		repo.scheduleQuery.EndDate.Format("2006-01-02") != "2026-08-11" {
+		t.Fatalf("unexpected schedule query: %+v", repo.scheduleQuery)
+	}
+	if dailies[0].Date.Format("2006-01-02") != "2026-08-11" ||
+		dailies[0].Status != domain.DailyAttendanceStatusRestDay ||
+		dailies[0].NonWorkdayReason != "company_holiday" {
+		t.Fatalf("unexpected holiday daily: %+v", dailies[0])
+	}
+	if dailies[1].Date.Format("2006-01-02") != "2026-08-10" ||
+		dailies[1].ShiftID != "night" ||
+		dailies[1].Status != domain.DailyAttendanceStatusNormal {
+		t.Fatalf("unexpected scheduled daily: %+v", dailies[1])
 	}
 }
 

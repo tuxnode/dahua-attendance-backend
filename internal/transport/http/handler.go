@@ -17,21 +17,21 @@ import (
 )
 
 const (
-	DefaultMaxBodyBytes      = 8 << 20
-	DefaultPath              = "/"
-	DeviceEventsPath         = "/api/v1/device/events"
-	AttendanceRecordsPath    = "/api/v1/attendance/records"
-	DailyAttendancePath      = "/api/v1/attendance/daily"
-	MonthlyAttendancePath    = "/api/v1/attendance/monthly"
-	AttendanceSummaryPath    = "/api/v1/attendance/summary"
-	AttendanceExceptionsPath = "/api/v1/attendance/exceptions"
-	AttendanceSettingsPath   = "/api/v1/attendance/settings"
-	AttendanceShiftsPath     = "/api/v1/attendance/shifts"
-	AttendanceShiftPath      = "/api/v1/attendance/shifts/:id"
-	AttendanceCalendarDaysPath = "/api/v1/attendance/calendar-days"
-	AttendanceCalendarDayPath  = "/api/v1/attendance/calendar-days/:date"
-	AttendanceSchedulesPath    = "/api/v1/attendance/schedules"
-	AttendanceSchedulePath     = "/api/v1/attendance/schedules/:id"
+	DefaultMaxBodyBytes           = 8 << 20
+	DefaultPath                   = "/"
+	DeviceEventsPath              = "/api/v1/device/events"
+	AttendanceRecordsPath         = "/api/v1/attendance/records"
+	DailyAttendancePath           = "/api/v1/attendance/daily"
+	MonthlyAttendancePath         = "/api/v1/attendance/monthly"
+	AttendanceSummaryPath         = "/api/v1/attendance/summary"
+	AttendanceExceptionsPath      = "/api/v1/attendance/exceptions"
+	AttendanceSettingsPath        = "/api/v1/attendance/settings"
+	AttendanceShiftsPath          = "/api/v1/attendance/shifts"
+	AttendanceShiftPath           = "/api/v1/attendance/shifts/:id"
+	AttendanceCalendarDaysPath    = "/api/v1/attendance/calendar-days"
+	AttendanceCalendarDayPath     = "/api/v1/attendance/calendar-days/:date"
+	AttendanceSchedulesPath       = "/api/v1/attendance/schedules"
+	AttendanceSchedulePath        = "/api/v1/attendance/schedules/:id"
 	AttendanceWeeklySchedulesPath = "/api/v1/attendance/weekly-schedules"
 	AttendanceWeeklySchedulePath  = "/api/v1/attendance/weekly-schedules/:id"
 

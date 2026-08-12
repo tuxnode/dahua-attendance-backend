@@ -21,73 +21,73 @@ import (
 )
 
 type fakeService struct {
-	payload            *parser.ParsedPayload
-	records            []domain.AttendanceRecord
-	dailyRecords       []domain.DailyAttendance
-	monthlyRecords     []domain.MonthlyAttendance
-	summary            domain.AttendanceSummary
-	settings           domain.AttendanceSettings
-	shifts             []domain.AttendanceShift
-	calendarDays       []domain.AttendanceCalendarDay
-	schedules          []domain.ManagedAttendanceSchedule
-	weeklySchedules    []domain.ManagedAttendanceWeeklySchedule
-	query              domain.AttendanceRecordQuery
-	dailyQuery         domain.DailyAttendanceQuery
-	monthlyQuery       domain.MonthlyAttendanceQuery
-	summaryQuery       domain.AttendanceSummaryQuery
-	exceptionQuery     domain.AttendanceExceptionQuery
-	shiftQuery         domain.AttendanceShiftQuery
-	calendarDayQuery   domain.AttendanceCalendarDayQuery
-	scheduleQuery      domain.AttendanceScheduleQuery
-	weeklyScheduleQuery domain.AttendanceWeeklyScheduleQuery
-	savedSettings      domain.AttendanceSettings
-	savedShift         domain.AttendanceShift
-	deletedShiftID     string
-	savedCalendarDay   domain.AttendanceCalendarDay
-	deletedCalendarDay time.Time
-	savedSchedule      domain.ManagedAttendanceSchedule
-	deletedScheduleID  int64
-	savedWeeklySchedule domain.ManagedAttendanceWeeklySchedule
-	deletedWeeklyScheduleID int64
-	handleErr          error
-	listErr            error
-	listDailyErr       error
-	listMonthlyErr     error
-	summaryErr         error
-	listExceptionErr   error
-	settingsErr        error
-	saveSettingsErr    error
-	listShiftsErr      error
-	saveShiftErr       error
-	deleteShiftErr     error
-	listCalendarDaysErr error
-	saveCalendarDayErr error
-	deleteCalendarDayErr error
-	listSchedulesErr   error
-	saveScheduleErr    error
-	deleteScheduleErr  error
-	listWeeklySchedulesErr error
-	saveWeeklyScheduleErr error
-	deleteWeeklyScheduleErr error
-	handleDeviceCalls  int
-	listRecordsCalls   int
-	listDailyCalls     int
-	listMonthlyCalls   int
-	summaryCalls       int
-	listExceptionCalls int
-	getSettingsCalls   int
-	saveSettingsCalls  int
-	listShiftsCalls    int
-	saveShiftCalls     int
-	deleteShiftCalls   int
-	listCalendarDaysCalls int
-	saveCalendarDayCalls int
-	deleteCalendarDayCalls int
-	listSchedulesCalls int
-	saveScheduleCalls  int
-	deleteScheduleCalls int
-	listWeeklySchedulesCalls int
-	saveWeeklyScheduleCalls int
+	payload                   *parser.ParsedPayload
+	records                   []domain.AttendanceRecord
+	dailyRecords              []domain.DailyAttendance
+	monthlyRecords            []domain.MonthlyAttendance
+	summary                   domain.AttendanceSummary
+	settings                  domain.AttendanceSettings
+	shifts                    []domain.AttendanceShift
+	calendarDays              []domain.AttendanceCalendarDay
+	schedules                 []domain.ManagedAttendanceSchedule
+	weeklySchedules           []domain.ManagedAttendanceWeeklySchedule
+	query                     domain.AttendanceRecordQuery
+	dailyQuery                domain.DailyAttendanceQuery
+	monthlyQuery              domain.MonthlyAttendanceQuery
+	summaryQuery              domain.AttendanceSummaryQuery
+	exceptionQuery            domain.AttendanceExceptionQuery
+	shiftQuery                domain.AttendanceShiftQuery
+	calendarDayQuery          domain.AttendanceCalendarDayQuery
+	scheduleQuery             domain.AttendanceScheduleQuery
+	weeklyScheduleQuery       domain.AttendanceWeeklyScheduleQuery
+	savedSettings             domain.AttendanceSettings
+	savedShift                domain.AttendanceShift
+	deletedShiftID            string
+	savedCalendarDay          domain.AttendanceCalendarDay
+	deletedCalendarDay        time.Time
+	savedSchedule             domain.ManagedAttendanceSchedule
+	deletedScheduleID         int64
+	savedWeeklySchedule       domain.ManagedAttendanceWeeklySchedule
+	deletedWeeklyScheduleID   int64
+	handleErr                 error
+	listErr                   error
+	listDailyErr              error
+	listMonthlyErr            error
+	summaryErr                error
+	listExceptionErr          error
+	settingsErr               error
+	saveSettingsErr           error
+	listShiftsErr             error
+	saveShiftErr              error
+	deleteShiftErr            error
+	listCalendarDaysErr       error
+	saveCalendarDayErr        error
+	deleteCalendarDayErr      error
+	listSchedulesErr          error
+	saveScheduleErr           error
+	deleteScheduleErr         error
+	listWeeklySchedulesErr    error
+	saveWeeklyScheduleErr     error
+	deleteWeeklyScheduleErr   error
+	handleDeviceCalls         int
+	listRecordsCalls          int
+	listDailyCalls            int
+	listMonthlyCalls          int
+	summaryCalls              int
+	listExceptionCalls        int
+	getSettingsCalls          int
+	saveSettingsCalls         int
+	listShiftsCalls           int
+	saveShiftCalls            int
+	deleteShiftCalls          int
+	listCalendarDaysCalls     int
+	saveCalendarDayCalls      int
+	deleteCalendarDayCalls    int
+	listSchedulesCalls        int
+	saveScheduleCalls         int
+	deleteScheduleCalls       int
+	listWeeklySchedulesCalls  int
+	saveWeeklyScheduleCalls   int
 	deleteWeeklyScheduleCalls int
 }
 
@@ -778,6 +778,391 @@ func TestHandleAttendanceExceptionsReturnsRecords(t *testing.T) {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("response missing %s: %s", expected, body)
 		}
+	}
+}
+
+func TestHandleAttendanceSettingsReturnsSettings(t *testing.T) {
+	service := &fakeService{
+		settings: domain.AttendanceSettings{
+			Timezone:       "Asia/Shanghai",
+			DefaultShiftID: "day",
+			WeekendDays:    []time.Weekday{time.Saturday, time.Sunday},
+		},
+	}
+	router := newTestRouter(service)
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.AttendanceSettingsPath, nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.getSettingsCalls != 1 {
+		t.Fatalf("unexpected get settings calls: %d", service.getSettingsCalls)
+	}
+
+	body := response.Body.String()
+	for _, expected := range []string{
+		`"timezone":"Asia/Shanghai"`,
+		`"default_shift_id":"day"`,
+		`"weekend_days":["saturday","sunday"]`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("response missing %s: %s", expected, body)
+		}
+	}
+}
+
+func TestHandleSaveAttendanceSettings(t *testing.T) {
+	service := &fakeService{}
+	router := newTestRouter(service)
+
+	body := `{
+		"timezone": "Asia/Shanghai",
+		"default_shift_id": "night",
+		"weekend_days": ["friday", "saturday"]
+	}`
+	request := httptest.NewRequest(http.MethodPut, transporthttp.AttendanceSettingsPath, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.saveSettingsCalls != 1 {
+		t.Fatalf("unexpected save settings calls: %d", service.saveSettingsCalls)
+	}
+	if service.savedSettings.Timezone != "Asia/Shanghai" {
+		t.Fatalf("unexpected timezone: %s", service.savedSettings.Timezone)
+	}
+	if service.savedSettings.DefaultShiftID != "night" {
+		t.Fatalf("unexpected default shift: %s", service.savedSettings.DefaultShiftID)
+	}
+	if len(service.savedSettings.WeekendDays) != 2 ||
+		service.savedSettings.WeekendDays[0] != time.Friday ||
+		service.savedSettings.WeekendDays[1] != time.Saturday {
+		t.Fatalf("unexpected weekend days: %+v", service.savedSettings.WeekendDays)
+	}
+}
+
+func TestHandleSaveAttendanceSettingsRejectsInvalidWeekday(t *testing.T) {
+	router := newTestRouter(&fakeService{})
+
+	body := `{"timezone":"Asia/Shanghai","default_shift_id":"day","weekend_days":["holiday"]}`
+	request := httptest.NewRequest(http.MethodPut, transporthttp.AttendanceSettingsPath, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d", response.Code)
+	}
+}
+
+func TestHandleAttendanceShiftsReturnsRecords(t *testing.T) {
+	service := &fakeService{
+		shifts: []domain.AttendanceShift{
+			{
+				ID:              "night",
+				Name:            "Night Shift",
+				Start:           domain.ClockTime{Hour: 21},
+				End:             domain.ClockTime{Hour: 6},
+				LateGrace:       5 * time.Minute,
+				EarlyLeaveGrace: 5 * time.Minute,
+				Flexible:        10 * time.Minute,
+				Enabled:         true,
+			},
+		},
+	}
+	router := newTestRouter(service)
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.AttendanceShiftsPath+"?include_disabled=true&limit=20&offset=10", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if !service.shiftQuery.IncludeDisabled {
+		t.Fatal("expected include_disabled query")
+	}
+	if service.shiftQuery.Limit != 20 || service.shiftQuery.Offset != 10 {
+		t.Fatalf("unexpected pagination: limit=%d offset=%d", service.shiftQuery.Limit, service.shiftQuery.Offset)
+	}
+
+	body := response.Body.String()
+	for _, expected := range []string{
+		`"id":"night"`,
+		`"start_time":"21:00"`,
+		`"end_time":"06:00"`,
+		`"flexible_minutes":10`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("response missing %s: %s", expected, body)
+		}
+	}
+}
+
+func TestHandleSaveAttendanceShift(t *testing.T) {
+	service := &fakeService{}
+	router := newTestRouter(service)
+
+	body := `{
+		"id": "night",
+		"name": "Night Shift",
+		"start_time": "21:00",
+		"end_time": "06:00",
+		"late_grace_minutes": 3,
+		"early_leave_grace_minutes": 4,
+		"flexible_minutes": 10
+	}`
+	request := httptest.NewRequest(http.MethodPost, transporthttp.AttendanceShiftsPath, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.saveShiftCalls != 1 {
+		t.Fatalf("unexpected save shift calls: %d", service.saveShiftCalls)
+	}
+	if service.savedShift.ID != "night" || service.savedShift.Name != "Night Shift" {
+		t.Fatalf("unexpected shift: %+v", service.savedShift)
+	}
+	if service.savedShift.Start.Hour != 21 || service.savedShift.End.Hour != 6 {
+		t.Fatalf("unexpected shift time: %+v", service.savedShift)
+	}
+	if !service.savedShift.Enabled {
+		t.Fatal("expected enabled default")
+	}
+	if service.savedShift.Flexible != 10*time.Minute {
+		t.Fatalf("unexpected flexible: %s", service.savedShift.Flexible)
+	}
+}
+
+func TestHandleSaveAttendanceShiftRejectsMismatchedID(t *testing.T) {
+	router := newTestRouter(&fakeService{})
+
+	body := `{"id":"night","start_time":"09:00","end_time":"18:00","enabled":true}`
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/attendance/shifts/day", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d", response.Code)
+	}
+}
+
+func TestHandleAttendanceCalendarDaysReturnsRecords(t *testing.T) {
+	date := time.Date(2026, 10, 1, 0, 0, 0, 0, time.Local)
+	service := &fakeService{
+		calendarDays: []domain.AttendanceCalendarDay{
+			{
+				Date:    date,
+				DayType: domain.CalendarDayTypeHoliday,
+				Name:    "national_day",
+			},
+		},
+	}
+	router := newTestRouter(service)
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.AttendanceCalendarDaysPath+"?start_date=2026-10-01&end_date=2026-10-07&day_type=holiday&limit=20&offset=10", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.calendarDayQuery.StartDate.Format("2006-01-02") != "2026-10-01" {
+		t.Fatalf("unexpected start date: %s", service.calendarDayQuery.StartDate)
+	}
+	if service.calendarDayQuery.EndDate.Format("2006-01-02") != "2026-10-07" {
+		t.Fatalf("unexpected end date: %s", service.calendarDayQuery.EndDate)
+	}
+	if service.calendarDayQuery.DayType != domain.CalendarDayTypeHoliday {
+		t.Fatalf("unexpected day type: %s", service.calendarDayQuery.DayType)
+	}
+	if !strings.Contains(response.Body.String(), `"day_type":"holiday"`) {
+		t.Fatalf("unexpected response body: %s", response.Body.String())
+	}
+}
+
+func TestHandleSaveAttendanceCalendarDay(t *testing.T) {
+	service := &fakeService{}
+	router := newTestRouter(service)
+
+	body := `{"day_type":"holiday","name":"national_day"}`
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/attendance/calendar-days/2026-10-01", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.saveCalendarDayCalls != 1 {
+		t.Fatalf("unexpected save calendar day calls: %d", service.saveCalendarDayCalls)
+	}
+	if service.savedCalendarDay.Date.Format("2006-01-02") != "2026-10-01" {
+		t.Fatalf("unexpected date: %s", service.savedCalendarDay.Date)
+	}
+	if service.savedCalendarDay.DayType != domain.CalendarDayTypeHoliday {
+		t.Fatalf("unexpected day type: %s", service.savedCalendarDay.DayType)
+	}
+}
+
+func TestHandleAttendanceSchedulesParsesFilters(t *testing.T) {
+	service := &fakeService{
+		schedules: []domain.ManagedAttendanceSchedule{
+			{
+				ID:       7,
+				UserID:   "REDACTED_USER_ID",
+				DeviceSN: "REDACTED_DEVICE_SN",
+				Date:     time.Date(2026, 8, 10, 0, 0, 0, 0, time.Local),
+				ShiftID:  "night",
+				Enabled:  true,
+			},
+		},
+	}
+	router := newTestRouter(service)
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.AttendanceSchedulesPath+"?user_id=REDACTED_USER_ID&device_sn=REDACTED_DEVICE_SN&start_date=2026-08-01&end_date=2026-08-31&limit=10&offset=5", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.scheduleQuery.UserID != "REDACTED_USER_ID" || service.scheduleQuery.DeviceSN != "REDACTED_DEVICE_SN" {
+		t.Fatalf("unexpected schedule query: %+v", service.scheduleQuery)
+	}
+	if service.scheduleQuery.StartDate.Format("2006-01-02") != "2026-08-01" ||
+		service.scheduleQuery.EndDate.Format("2006-01-02") != "2026-08-31" {
+		t.Fatalf("unexpected schedule date range: %+v", service.scheduleQuery)
+	}
+	if !strings.Contains(response.Body.String(), `"shift_id":"night"`) {
+		t.Fatalf("unexpected response body: %s", response.Body.String())
+	}
+}
+
+func TestHandleSaveAttendanceSchedule(t *testing.T) {
+	service := &fakeService{}
+	router := newTestRouter(service)
+
+	body := `{
+		"user_id": "REDACTED_USER_ID",
+		"device_sn": "REDACTED_DEVICE_SN",
+		"date": "2026-08-10",
+		"shift_id": "night",
+		"rest": false
+	}`
+	request := httptest.NewRequest(http.MethodPost, transporthttp.AttendanceSchedulesPath, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.saveScheduleCalls != 1 {
+		t.Fatalf("unexpected save schedule calls: %d", service.saveScheduleCalls)
+	}
+	if service.savedSchedule.UserID != "REDACTED_USER_ID" || service.savedSchedule.DeviceSN != "REDACTED_DEVICE_SN" {
+		t.Fatalf("unexpected saved schedule: %+v", service.savedSchedule)
+	}
+	if service.savedSchedule.Date.Format("2006-01-02") != "2026-08-10" {
+		t.Fatalf("unexpected saved date: %s", service.savedSchedule.Date)
+	}
+	if !service.savedSchedule.Enabled {
+		t.Fatal("expected enabled default")
+	}
+}
+
+func TestHandleSaveAttendanceScheduleRejectsInvalidPathID(t *testing.T) {
+	router := newTestRouter(&fakeService{})
+
+	body := `{"date":"2026-08-10","shift_id":"day"}`
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/attendance/schedules/bad", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d", response.Code)
+	}
+}
+
+func TestHandleAttendanceWeeklySchedulesParsesWeekday(t *testing.T) {
+	service := &fakeService{
+		weeklySchedules: []domain.ManagedAttendanceWeeklySchedule{
+			{
+				ID:      9,
+				Weekday: time.Monday,
+				ShiftID: "day",
+				Enabled: true,
+			},
+		},
+	}
+	router := newTestRouter(service)
+
+	request := httptest.NewRequest(http.MethodGet, transporthttp.AttendanceWeeklySchedulesPath+"?weekday=monday&limit=10", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.weeklyScheduleQuery.Weekday == nil || *service.weeklyScheduleQuery.Weekday != time.Monday {
+		t.Fatalf("unexpected weekday query: %+v", service.weeklyScheduleQuery.Weekday)
+	}
+	if !strings.Contains(response.Body.String(), `"weekday":"monday"`) {
+		t.Fatalf("unexpected response body: %s", response.Body.String())
+	}
+}
+
+func TestHandleSaveAttendanceWeeklySchedule(t *testing.T) {
+	service := &fakeService{}
+	router := newTestRouter(service)
+
+	body := `{
+		"user_id": "REDACTED_USER_ID",
+		"weekday": "monday",
+		"shift_id": "day",
+		"rest": false
+	}`
+	request := httptest.NewRequest(http.MethodPost, transporthttp.AttendanceWeeklySchedulesPath, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.saveWeeklyScheduleCalls != 1 {
+		t.Fatalf("unexpected save weekly schedule calls: %d", service.saveWeeklyScheduleCalls)
+	}
+	if service.savedWeeklySchedule.UserID != "REDACTED_USER_ID" || service.savedWeeklySchedule.Weekday != time.Monday {
+		t.Fatalf("unexpected saved weekly schedule: %+v", service.savedWeeklySchedule)
+	}
+	if !service.savedWeeklySchedule.Enabled {
+		t.Fatal("expected enabled default")
 	}
 }
 
