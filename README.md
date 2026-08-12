@@ -4,14 +4,14 @@
 
 支持集成至Nacos统一注册管理
 
-服务接收门禁设备主动上报的通行记录、门状态和抓拍事件，解析后写入 MySQL，并通过 Gin HTTP API 为前端提供考勤记录、日报、月报、汇总和异常列表查询。Nacos 注册为可选能力。
+服务接收门禁设备主动上报的通行记录、门状态和抓拍事件，解析后写入 MySQL，并通过 Gin HTTP API 为前端提供考勤记录、日报、月报、汇总、异常列表以及考勤规则管理。Nacos 注册为可选能力。
 
 ## 功能
 
 - 设备 HTTP 上报接入：支持 JSON、`multipart/x-mixed-replace`、`multipart/form-data` 和 `deflate`。
 - 事件入库：`AccessControl` 写入 `attendance_records`，`DoorStatus` 写入 `door_status_records`。
 - 考勤统计：支持日报、月报、汇总、异常列表。
-- 考勤规则：支持业务时区、上下班时间、周末/节假日、工作日覆盖、弹性打卡、多班次和排班。
+- 考勤规则：支持业务时区、上下班时间、周末/节假日、工作日覆盖、弹性打卡、多班次和排班，规则通过 Web 接口写入数据库。
 - 服务注册：可选接入 Nacos Go SDK。
 
 ## 技术栈
@@ -83,6 +83,11 @@ Docker 默认配置文件为 [configs/config.docker.toml](configs/config.docker.
 - `GET /api/v1/attendance/monthly`：查询考勤月报
 - `GET /api/v1/attendance/summary`：查询考勤汇总
 - `GET /api/v1/attendance/exceptions`：查询考勤异常列表
+- `GET/PUT /api/v1/attendance/settings`：查询和更新考勤设置
+- `GET/POST/PUT/DELETE /api/v1/attendance/shifts`：管理班次
+- `GET/POST/PUT/DELETE /api/v1/attendance/calendar-days`：管理节假日和调休
+- `GET/POST/PUT/DELETE /api/v1/attendance/schedules`：管理按日期排班
+- `GET/POST/PUT/DELETE /api/v1/attendance/weekly-schedules`：管理按星期排班
 
 详细请求参数和响应字段见 [API 说明](docs/API.md)。
 

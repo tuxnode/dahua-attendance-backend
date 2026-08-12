@@ -81,125 +81,19 @@ connect_timeout = "5s"
 | `conn_max_lifetime` | 否 | `30m` | 连接最大生命周期。 |
 | `connect_timeout` | 否 | `5s` | 启动时数据库连通性检查超时时间。 |
 
-## attendance
+## 考勤规则
 
-`attendance` 控制日报、月报、汇总、异常列表的业务日期和考勤规则。
+考勤规则不再通过配置文件维护。服务启动配置只包含 `app`、`http`、`database`、`nacos`、`log` 等基础项；业务时区、默认班次、周末、节假日、工作日覆盖、班次、个人/设备排班通过 HTTP API 写入数据库。
 
-```toml
-[attendance]
-timezone = "Asia/Shanghai"
-default_shift_id = "day"
-weekend_days = ["saturday", "sunday"]
-workdays = ["2026-09-26"]
-```
+初始化数据库脚本会创建规则表，并写入默认设置：
 
-| 字段 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `timezone` | 否 | `Asia/Shanghai` | 考勤业务时区；设备事件会按该时区归属业务日期。 |
-| `default_shift_id` | 否 | `day` | 默认班次 ID。 |
-| `weekend_days` | 否 | `["saturday", "sunday"]` | 默认休息日星期列表。支持英文全称、三字母缩写或 `0`-`6`。 |
-| `workdays` | 否 | 空 | 工作日覆盖列表。用于把周末或节假日改为上班日。 |
+- `attendance_settings`：默认 `Asia/Shanghai`、默认班次 `day`、周六周日休息。
+- `attendance_shifts`：默认 `day` 班次，`09:00-18:00`。
+- `attendance_calendar_days`：节假日、调休工作日、额外休息日。
+- `attendance_schedules`：按日期排班，支持 `user_id`、`device_sn` 作用范围。
+- `attendance_weekly_schedules`：按星期排班，支持 `user_id`、`device_sn` 作用范围。
 
-### 节假日
-
-```toml
-[[attendance.holidays]]
-date = "2026-10-01"
-name = "national_day"
-```
-
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `date` | 是 | 日期，格式 `YYYY-MM-DD`。 |
-| `name` | 否 | 休息原因；为空时统计结果使用 `holiday`。 |
-
-规则优先级中，`workdays` 高于 `holidays` 和 `weekend_days`。
-
-### 班次
-
-```toml
-[[attendance.shifts]]
-id = "day"
-name = "Day Shift"
-start_time = "09:00"
-end_time = "18:00"
-late_grace_minutes = 5
-early_leave_grace_minutes = 5
-flexible_minutes = 10
-enabled = true
-```
-
-| 字段 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `id` | 是 | 无 | 班次 ID，需要和 `default_shift_id`、排班中的 `shift_id` 对应。 |
-| `name` | 否 | `id` | 班次名称，会返回给前端。 |
-| `start_time` | 否 | `09:00` | 上班时间，格式 `HH:MM`。 |
-| `end_time` | 否 | `18:00` | 下班时间，格式 `HH:MM`；小于等于上班时间时按跨日班次处理。 |
-| `late_grace_minutes` | 否 | `0` | 迟到宽限分钟数。 |
-| `early_leave_grace_minutes` | 否 | `0` | 早退宽限分钟数。 |
-| `flexible_minutes` | 否 | `0` | 弹性打卡分钟数，会叠加到迟到判断阈值。 |
-| `enabled` | 否 | `true` | 是否启用该班次。显式写 `false` 时该班次不会参与规则匹配。 |
-
-迟到判断阈值为 `start_time + late_grace_minutes + flexible_minutes`。早退判断阈值为 `end_time - early_leave_grace_minutes`。
-
-跨日班次示例：
-
-```toml
-[[attendance.shifts]]
-id = "night"
-name = "Night Shift"
-start_time = "21:00"
-end_time = "06:00"
-late_grace_minutes = 5
-early_leave_grace_minutes = 5
-enabled = true
-```
-
-## 排班
-
-排班用于覆盖默认工作日和默认班次，支持按日期和按星期配置。匹配优先级为：指定用户和设备 > 指定用户 > 指定设备 > 全局规则。
-
-### 按日期排班
-
-```toml
-[[attendance.schedules]]
-user_id = "REDACTED_USER_ID"
-device_sn = ""
-date = "2026-08-10"
-shift_id = "night"
-rest = false
-reason = ""
-```
-
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `user_id` | 否 | 用户 ID；为空表示不限用户。 |
-| `device_sn` | 否 | 设备 SN；为空表示不限设备。 |
-| `date` | 是 | 生效日期，格式 `YYYY-MM-DD`。 |
-| `shift_id` | 否 | 上班日使用的班次 ID；为空时使用默认班次。 |
-| `rest` | 否 | 是否排休。为 `true` 时当天状态为 `rest_day`。 |
-| `reason` | 否 | 排休原因；为空时使用 `scheduled_rest`。 |
-
-### 按星期排班
-
-```toml
-[[attendance.weekly_schedules]]
-user_id = ""
-device_sn = ""
-weekday = "monday"
-shift_id = "day"
-rest = false
-reason = ""
-```
-
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `user_id` | 否 | 用户 ID；为空表示不限用户。 |
-| `device_sn` | 否 | 设备 SN；为空表示不限设备。 |
-| `weekday` | 是 | 星期。支持 `sunday` 到 `saturday`、`sun` 到 `sat`、`0` 到 `6`。 |
-| `shift_id` | 否 | 上班日使用的班次 ID。 |
-| `rest` | 否 | 是否排休。 |
-| `reason` | 否 | 排休原因。 |
+规则管理接口见 [API 说明](API.md#考勤规则管理)。
 
 ## nacos
 

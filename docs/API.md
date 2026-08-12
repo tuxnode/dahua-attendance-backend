@@ -139,7 +139,7 @@ curl "http://127.0.0.1:8080/api/v1/attendance/records?user_id=REDACTED_USER_ID&s
 
 ### `GET /api/v1/attendance/daily`
 
-按考勤规则生成日报。日报会基于配置的时区、班次、周末、节假日、工作日覆盖和排班计算。
+按考勤规则生成日报。日报会基于数据库中的时区、班次、周末、节假日、工作日覆盖和排班计算。
 
 查询参数：
 
@@ -415,6 +415,247 @@ curl "http://127.0.0.1:8080/api/v1/attendance/exceptions?start_date=2026-08-01&e
 }
 ```
 
+## 考勤规则管理
+
+当前不使用鉴权。规则写入数据库后，日报、月报、汇总、异常列表会在查询时加载当前启用规则。
+
+规则匹配优先级：
+
+1. 按日期排班优先于按星期排班。
+2. 指定 `user_id` 和 `device_sn` 的规则优先于只指定 `user_id` 或只指定 `device_sn` 的规则。
+3. `user_id`、`device_sn` 均为空表示全局规则。
+4. 未命中排班时，按日历覆盖、周末设置和默认班次计算。
+
+### 设置
+
+#### `GET /api/v1/attendance/settings`
+
+响应：
+
+```json
+{
+  "settings": {
+    "timezone": "Asia/Shanghai",
+    "default_shift_id": "day",
+    "weekend_days": ["saturday", "sunday"]
+  }
+}
+```
+
+#### `PUT /api/v1/attendance/settings`
+
+请求：
+
+```json
+{
+  "timezone": "Asia/Shanghai",
+  "default_shift_id": "day",
+  "weekend_days": ["saturday", "sunday"]
+}
+```
+
+### 班次
+
+#### `GET /api/v1/attendance/shifts`
+
+查询参数：
+
+| 参数 | 必填 | 格式 | 说明 |
+| --- | --- | --- | --- |
+| `include_disabled` | 否 | bool | 是否包含已禁用班次。 |
+| `limit` | 否 | int | 分页大小。 |
+| `offset` | 否 | int | 分页偏移。 |
+
+#### `POST /api/v1/attendance/shifts`
+
+新增或更新班次。
+
+#### `PUT /api/v1/attendance/shifts/{id}`
+
+按路径 ID 新增或更新班次。请求体中的 `id` 为空时使用路径 ID；同时提供时必须一致。
+
+请求：
+
+```json
+{
+  "id": "night",
+  "name": "Night Shift",
+  "start_time": "21:00",
+  "end_time": "06:00",
+  "late_grace_minutes": 5,
+  "early_leave_grace_minutes": 5,
+  "flexible_minutes": 10,
+  "enabled": true
+}
+```
+
+响应：
+
+```json
+{
+  "record": {
+    "id": "night",
+    "name": "Night Shift",
+    "start_time": "21:00",
+    "end_time": "06:00",
+    "late_grace_minutes": 5,
+    "early_leave_grace_minutes": 5,
+    "flexible_minutes": 10,
+    "enabled": true
+  }
+}
+```
+
+#### `DELETE /api/v1/attendance/shifts/{id}`
+
+删除班次。成功返回 `204`。
+
+迟到判断阈值为 `start_time + late_grace_minutes + flexible_minutes`，早退判断阈值为 `end_time - early_leave_grace_minutes`。`end_time` 小于等于 `start_time` 时按跨日班次处理。
+
+### 日历覆盖
+
+日历覆盖用于配置节假日、调休工作日和额外休息日。
+
+#### `GET /api/v1/attendance/calendar-days`
+
+查询参数：
+
+| 参数 | 必填 | 格式 | 说明 |
+| --- | --- | --- | --- |
+| `date` | 否 | `YYYY-MM-DD` | 查询单日，不能和 `start_date`、`end_date` 同时使用。 |
+| `start_date` | 否 | `YYYY-MM-DD` | 起始日期。 |
+| `end_date` | 否 | `YYYY-MM-DD` | 结束日期。 |
+| `day_type` | 否 | string | `holiday`、`workday`、`rest_day`。 |
+| `limit` | 否 | int | 分页大小。 |
+| `offset` | 否 | int | 分页偏移。 |
+
+#### `POST /api/v1/attendance/calendar-days`
+
+新增或更新日历覆盖。
+
+#### `PUT /api/v1/attendance/calendar-days/{date}`
+
+按路径日期新增或更新日历覆盖。
+
+请求：
+
+```json
+{
+  "date": "2026-10-01",
+  "day_type": "holiday",
+  "name": "national_day"
+}
+```
+
+`day_type` 说明：
+
+| 值 | 说明 |
+| --- | --- |
+| `holiday` | 节假日，非工作日。 |
+| `rest_day` | 额外休息日，非工作日。 |
+| `workday` | 调休工作日，覆盖周末或节假日。 |
+
+#### `DELETE /api/v1/attendance/calendar-days/{date}`
+
+删除日历覆盖。成功返回 `204`。
+
+### 按日期排班
+
+#### `GET /api/v1/attendance/schedules`
+
+查询参数：
+
+| 参数 | 必填 | 格式 | 说明 |
+| --- | --- | --- | --- |
+| `user_id` | 否 | string | 用户 ID。 |
+| `device_sn` | 否 | string | 设备 SN。 |
+| `date` | 否 | `YYYY-MM-DD` | 查询单日。 |
+| `start_date` | 否 | `YYYY-MM-DD` | 起始日期。 |
+| `end_date` | 否 | `YYYY-MM-DD` | 结束日期。 |
+| `include_disabled` | 否 | bool | 是否包含已禁用排班。 |
+| `limit` | 否 | int | 分页大小。 |
+| `offset` | 否 | int | 分页偏移。 |
+
+#### `POST /api/v1/attendance/schedules`
+
+新增或更新按日期排班。`user_id` 和 `device_sn` 可同时为空，表示全局日期排班。
+
+#### `PUT /api/v1/attendance/schedules/{id}`
+
+按 ID 更新排班。
+
+请求：
+
+```json
+{
+  "user_id": "REDACTED_USER_ID",
+  "device_sn": "REDACTED_DEVICE_SN",
+  "date": "2026-08-10",
+  "shift_id": "night",
+  "rest": false,
+  "reason": "",
+  "enabled": true
+}
+```
+
+排休示例：
+
+```json
+{
+  "user_id": "REDACTED_USER_ID",
+  "date": "2026-08-11",
+  "shift_id": "",
+  "rest": true,
+  "reason": "scheduled_rest",
+  "enabled": true
+}
+```
+
+#### `DELETE /api/v1/attendance/schedules/{id}`
+
+删除按日期排班。成功返回 `204`。
+
+### 按星期排班
+
+#### `GET /api/v1/attendance/weekly-schedules`
+
+查询参数：
+
+| 参数 | 必填 | 格式 | 说明 |
+| --- | --- | --- | --- |
+| `user_id` | 否 | string | 用户 ID。 |
+| `device_sn` | 否 | string | 设备 SN。 |
+| `weekday` | 否 | string | `sunday` 到 `saturday`，也支持 `sun` 到 `sat`、`0` 到 `6`。 |
+| `include_disabled` | 否 | bool | 是否包含已禁用周排班。 |
+| `limit` | 否 | int | 分页大小。 |
+| `offset` | 否 | int | 分页偏移。 |
+
+#### `POST /api/v1/attendance/weekly-schedules`
+
+新增或更新按星期排班。`user_id` 和 `device_sn` 可同时为空，表示全局周排班。
+
+#### `PUT /api/v1/attendance/weekly-schedules/{id}`
+
+按 ID 更新周排班。
+
+请求：
+
+```json
+{
+  "user_id": "",
+  "device_sn": "",
+  "weekday": "monday",
+  "shift_id": "day",
+  "rest": false,
+  "reason": "",
+  "enabled": true
+}
+```
+
+#### `DELETE /api/v1/attendance/weekly-schedules/{id}`
+
+删除按星期排班。成功返回 `204`。
+
 ## 参数校验规则
 
 - `start_time`、`end_time` 必须为正整数 Unix 秒。
@@ -425,6 +666,9 @@ curl "http://127.0.0.1:8080/api/v1/attendance/exceptions?start_date=2026-08-01&e
 - 日报、汇总、异常列表日期范围不能超过 `31` 天。
 - `month` 必须使用 `YYYY-MM`。
 - `limit`、`offset` 必须为整数。
+- `start_time`、`end_time` 班次时间必须使用 `HH:MM`。
+- `day_type` 只支持 `holiday`、`workday`、`rest_day`。
+- `weekday` 支持英文全称、三字母缩写或 `0` 到 `6`。
 
 ## 敏感信息
 

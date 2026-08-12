@@ -19,51 +19,6 @@ max_idle_conns = 5
 conn_max_lifetime = "30m"
 connect_timeout = "5s"
 
-[attendance]
-timezone = "Asia/Shanghai"
-default_shift_id = "day"
-weekend_days = ["saturday", "sunday"]
-workdays = ["2026-09-26"]
-
-[[attendance.holidays]]
-date = "2026-10-01"
-name = "national_day"
-
-[[attendance.shifts]]
-id = "day"
-name = "Day Shift"
-start_time = "09:00"
-end_time = "18:00"
-late_grace_minutes = 5
-early_leave_grace_minutes = 5
-flexible_minutes = 0
-enabled = true
-
-[[attendance.shifts]]
-id = "night"
-name = "Night Shift"
-start_time = "21:00"
-end_time = "06:00"
-late_grace_minutes = 5
-early_leave_grace_minutes = 5
-flexible_minutes = 0
-enabled = true
-
-[[attendance.schedules]]
-user_id = "REDACTED_USER_ID"
-date = "2026-08-10"
-shift_id = "night"
-rest = false
-reason = ""
-
-[[attendance.weekly_schedules]]
-user_id = ""
-device_sn = ""
-weekday = "monday"
-shift_id = "day"
-rest = false
-reason = ""
-
 # Nacos is optional. Remove this section or keep enabled = false to run without Nacos.
 [nacos]
 enabled = false
