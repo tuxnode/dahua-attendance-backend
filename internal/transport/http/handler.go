@@ -867,6 +867,10 @@ func parseAttendanceScheduleQuery(c *gin.Context) (domain.AttendanceScheduleQuer
 		return domain.AttendanceScheduleQuery{}, err
 	}
 
+	includeDisabled, err := parseBoolQuery(c, "include_disabled")
+	if err != nil {
+		return domain.AttendanceScheduleQuery{}, err
+	}
 	limit, err := parseIntQuery(c, "limit")
 	if err != nil {
 		return domain.AttendanceScheduleQuery{}, err
@@ -877,12 +881,13 @@ func parseAttendanceScheduleQuery(c *gin.Context) (domain.AttendanceScheduleQuer
 	}
 
 	return domain.AttendanceScheduleQuery{
-		UserID:    strings.TrimSpace(c.Query("user_id")),
-		DeviceSN:  strings.TrimSpace(c.Query("device_sn")),
-		StartDate: startDate,
-		EndDate:   endDate,
-		Limit:     limit,
-		Offset:    offset,
+		UserID:          strings.TrimSpace(c.Query("user_id")),
+		DeviceSN:        strings.TrimSpace(c.Query("device_sn")),
+		StartDate:       startDate,
+		EndDate:         endDate,
+		IncludeDisabled: includeDisabled,
+		Limit:           limit,
+		Offset:          offset,
 	}, nil
 }
 
@@ -897,6 +902,10 @@ func parseAttendanceWeeklyScheduleQuery(c *gin.Context) (domain.AttendanceWeekly
 		weekdayPtr = &weekday
 	}
 
+	includeDisabled, err := parseBoolQuery(c, "include_disabled")
+	if err != nil {
+		return domain.AttendanceWeeklyScheduleQuery{}, err
+	}
 	limit, err := parseIntQuery(c, "limit")
 	if err != nil {
 		return domain.AttendanceWeeklyScheduleQuery{}, err
@@ -907,11 +916,12 @@ func parseAttendanceWeeklyScheduleQuery(c *gin.Context) (domain.AttendanceWeekly
 	}
 
 	return domain.AttendanceWeeklyScheduleQuery{
-		UserID:   strings.TrimSpace(c.Query("user_id")),
-		DeviceSN: strings.TrimSpace(c.Query("device_sn")),
-		Weekday:  weekdayPtr,
-		Limit:    limit,
-		Offset:   offset,
+		UserID:          strings.TrimSpace(c.Query("user_id")),
+		DeviceSN:        strings.TrimSpace(c.Query("device_sn")),
+		Weekday:         weekdayPtr,
+		IncludeDisabled: includeDisabled,
+		Limit:           limit,
+		Offset:          offset,
 	}, nil
 }
 

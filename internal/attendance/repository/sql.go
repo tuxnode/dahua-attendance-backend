@@ -329,7 +329,10 @@ SELECT
 	reason,
 	enabled
 FROM attendance_schedules
-WHERE enabled = TRUE`)
+WHERE 1 = 1`)
+	if !filter.IncludeDisabled {
+		builder.WriteString("\n  AND enabled = TRUE")
+	}
 	if filter.UserID != "" {
 		builder.WriteString("\n  AND user_id = ?")
 		args = append(args, filter.UserID)
@@ -488,7 +491,10 @@ SELECT
 	reason,
 	enabled
 FROM attendance_weekly_schedules
-WHERE enabled = TRUE`)
+WHERE 1 = 1`)
+	if !filter.IncludeDisabled {
+		builder.WriteString("\n  AND enabled = TRUE")
+	}
 	if filter.UserID != "" {
 		builder.WriteString("\n  AND user_id = ?")
 		args = append(args, filter.UserID)

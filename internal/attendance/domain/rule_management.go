@@ -23,20 +23,22 @@ type AttendanceCalendarDayQuery struct {
 }
 
 type AttendanceScheduleQuery struct {
-	UserID    string
-	DeviceSN  string
-	StartDate time.Time
-	EndDate   time.Time
-	Limit     int
-	Offset    int
+	UserID          string
+	DeviceSN        string
+	StartDate       time.Time
+	EndDate         time.Time
+	IncludeDisabled bool
+	Limit           int
+	Offset          int
 }
 
 type AttendanceWeeklyScheduleQuery struct {
-	UserID   string
-	DeviceSN string
-	Weekday  *time.Weekday
-	Limit    int
-	Offset   int
+	UserID          string
+	DeviceSN        string
+	Weekday         *time.Weekday
+	IncludeDisabled bool
+	Limit           int
+	Offset          int
 }
 
 type CalendarDayType string
