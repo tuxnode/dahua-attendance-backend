@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -329,7 +330,97 @@ func (s *Service) listDailyAttendance(ctx context.Context, query domain.DailyAtt
 		return nil, fmt.Errorf("service: list daily attendance records: %w", err)
 	}
 
-	return buildDailyAttendance(query, records, s.rules), nil
+	rules, err := s.loadAttendanceRules(ctx, query.StartDate, query.EndDate)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildDailyAttendance(query, records, rules), nil
+}
+
+func (s *Service) loadAttendanceRules(ctx context.Context, startDate time.Time, endDate time.Time) (domain.AttendanceRules, error) {
+	settings, err := s.repository.GetAttendanceSettings(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return normalizeAttendanceRules(s.rules), nil
+		}
+		return domain.AttendanceRules{}, fmt.Errorf("service: get attendance settings: %w", err)
+	}
+
+	location, err := time.LoadLocation(settings.Timezone)
+	if err != nil {
+		return domain.AttendanceRules{}, fmt.Errorf("service: load attendance timezone %q: %w", settings.Timezone, err)
+	}
+
+	shifts, err := s.repository.ListAttendanceShifts(ctx, domain.AttendanceShiftQuery{})
+	if err != nil {
+		return domain.AttendanceRules{}, fmt.Errorf("service: list attendance shifts: %w", err)
+	}
+	calendarDays, err := s.repository.ListAttendanceCalendarDays(ctx, domain.AttendanceCalendarDayQuery{
+		StartDate: startDate,
+		EndDate:   endDate,
+	})
+	if err != nil {
+		return domain.AttendanceRules{}, fmt.Errorf("service: list attendance calendar days: %w", err)
+	}
+	schedules, err := s.repository.ListAttendanceSchedules(ctx, domain.AttendanceScheduleQuery{
+		StartDate: startDate,
+		EndDate:   endDate,
+	})
+	if err != nil {
+		return domain.AttendanceRules{}, fmt.Errorf("service: list attendance schedules: %w", err)
+	}
+	weeklySchedules, err := s.repository.ListAttendanceWeeklySchedules(ctx, domain.AttendanceWeeklyScheduleQuery{})
+	if err != nil {
+		return domain.AttendanceRules{}, fmt.Errorf("service: list attendance weekly schedules: %w", err)
+	}
+
+	rules := domain.AttendanceRules{
+		Location:        location,
+		DefaultShiftID:  settings.DefaultShiftID,
+		WeekendDays:     weekdayMap(settings.WeekendDays),
+		Holidays:        make(map[string]string),
+		Workdays:        make(map[string]bool),
+		CalendarDays:    make(map[string]domain.AttendanceCalendarDay, len(calendarDays)),
+		Shifts:          make(map[string]domain.AttendanceShift, len(shifts)),
+		Schedules:       make([]domain.AttendanceSchedule, 0, len(schedules)),
+		WeeklySchedules: make([]domain.AttendanceWeeklySchedule, 0, len(weeklySchedules)),
+	}
+	for _, shift := range shifts {
+		rules.Shifts[shift.ID] = shift
+	}
+	for _, day := range calendarDays {
+		key := dailyAttendanceDateKey(day.Date)
+		rules.CalendarDays[key] = day
+		switch day.DayType {
+		case domain.CalendarDayTypeWorkday:
+			rules.Workdays[key] = true
+		case domain.CalendarDayTypeHoliday, domain.CalendarDayTypeRestDay:
+			rules.Holidays[key] = day.Name
+		}
+	}
+	for _, schedule := range schedules {
+		rules.Schedules = append(rules.Schedules, domain.AttendanceSchedule{
+			UserID:   schedule.UserID,
+			DeviceSN: schedule.DeviceSN,
+			Date:     schedule.Date,
+			ShiftID:  schedule.ShiftID,
+			Rest:     schedule.Rest,
+			Reason:   schedule.Reason,
+		})
+	}
+	for _, schedule := range weeklySchedules {
+		rules.WeeklySchedules = append(rules.WeeklySchedules, domain.AttendanceWeeklySchedule{
+			UserID:   schedule.UserID,
+			DeviceSN: schedule.DeviceSN,
+			Weekday:  schedule.Weekday,
+			ShiftID:  schedule.ShiftID,
+			Rest:     schedule.Rest,
+			Reason:   schedule.Reason,
+		})
+	}
+
+	return normalizeAttendanceRules(rules), nil
 }
 
 func (s *Service) listDailyAttendanceRecords(ctx context.Context, query domain.DailyAttendanceQuery) ([]domain.AttendanceRecord, error) {
@@ -667,6 +758,9 @@ func normalizeAttendanceRules(rules domain.AttendanceRules) domain.AttendanceRul
 	if rules.Workdays == nil {
 		rules.Workdays = make(map[string]bool)
 	}
+	if rules.CalendarDays == nil {
+		rules.CalendarDays = make(map[string]domain.AttendanceCalendarDay)
+	}
 
 	normalizedShifts := make(map[string]domain.AttendanceShift, len(rules.Shifts))
 	for id, shift := range rules.Shifts {
@@ -694,6 +788,15 @@ func normalizeAttendanceRules(rules domain.AttendanceRules) domain.AttendanceRul
 	}
 
 	return rules
+}
+
+func weekdayMap(weekdays []time.Weekday) map[time.Weekday]bool {
+	values := make(map[time.Weekday]bool, len(weekdays))
+	for _, weekday := range weekdays {
+		values[weekday] = true
+	}
+
+	return values
 }
 
 func resolveAttendanceDayRule(rules domain.AttendanceRules, date time.Time, userID string, deviceSN string) domain.AttendanceDayRule {

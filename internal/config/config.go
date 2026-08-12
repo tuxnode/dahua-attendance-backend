@@ -40,12 +40,11 @@ var (
 )
 
 type Config struct {
-	App        AppConfig        `toml:"app"`
-	HTTP       HTTPConfig       `toml:"http"`
-	Database   DatabaseConfig   `toml:"database"`
-	Attendance AttendanceConfig `toml:"attendance"`
-	Log        LogConfig        `toml:"log"`
-	Nacos      NacosConfig      `toml:"nacos"`
+	App      AppConfig      `toml:"app"`
+	HTTP     HTTPConfig     `toml:"http"`
+	Database DatabaseConfig `toml:"database"`
+	Log      LogConfig      `toml:"log"`
+	Nacos    NacosConfig    `toml:"nacos"`
 }
 
 type AppConfig struct {
@@ -75,51 +74,6 @@ type DatabaseConfig struct {
 type LogConfig struct {
 	Level    string `toml:"level"`
 	FilePath string `toml:"file_path"`
-}
-
-type AttendanceConfig struct {
-	Timezone        string                           `toml:"timezone"`
-	DefaultShiftID  string                           `toml:"default_shift_id"`
-	WeekendDays     []string                         `toml:"weekend_days"`
-	Workdays        []string                         `toml:"workdays"`
-	Holidays        []AttendanceHolidayConfig        `toml:"holidays"`
-	Shifts          []AttendanceShiftConfig          `toml:"shifts"`
-	Schedules       []AttendanceScheduleConfig       `toml:"schedules"`
-	WeeklySchedules []AttendanceWeeklyScheduleConfig `toml:"weekly_schedules"`
-}
-
-type AttendanceHolidayConfig struct {
-	Date string `toml:"date"`
-	Name string `toml:"name"`
-}
-
-type AttendanceShiftConfig struct {
-	ID                     string `toml:"id"`
-	Name                   string `toml:"name"`
-	StartTime              string `toml:"start_time"`
-	EndTime                string `toml:"end_time"`
-	LateGraceMinutes       int    `toml:"late_grace_minutes"`
-	EarlyLeaveGraceMinutes int    `toml:"early_leave_grace_minutes"`
-	FlexibleMinutes        int    `toml:"flexible_minutes"`
-	Enabled                *bool  `toml:"enabled"`
-}
-
-type AttendanceScheduleConfig struct {
-	UserID   string `toml:"user_id"`
-	DeviceSN string `toml:"device_sn"`
-	Date     string `toml:"date"`
-	ShiftID  string `toml:"shift_id"`
-	Rest     bool   `toml:"rest"`
-	Reason   string `toml:"reason"`
-}
-
-type AttendanceWeeklyScheduleConfig struct {
-	UserID   string `toml:"user_id"`
-	DeviceSN string `toml:"device_sn"`
-	Weekday  string `toml:"weekday"`
-	ShiftID  string `toml:"shift_id"`
-	Rest     bool   `toml:"rest"`
-	Reason   string `toml:"reason"`
 }
 
 type NacosConfig struct {
@@ -229,23 +183,6 @@ func defaultConfig() *Config {
 			ConnMaxLifetime: Duration(defaultDatabaseConnLifetime),
 			ConnectTimeout:  Duration(defaultDatabaseConnectTime),
 		},
-		Attendance: AttendanceConfig{
-			Timezone:       "Asia/Shanghai",
-			DefaultShiftID: "day",
-			WeekendDays:    []string{"saturday", "sunday"},
-			Shifts: []AttendanceShiftConfig{
-				{
-					ID:                     "day",
-					Name:                   "Day Shift",
-					StartTime:              "09:00",
-					EndTime:                "18:00",
-					LateGraceMinutes:       0,
-					EarlyLeaveGraceMinutes: 0,
-					FlexibleMinutes:        0,
-					Enabled:                boolPtr(true),
-				},
-			},
-		},
 		Nacos: NacosConfig{
 			Address:     defaultNacosAddress,
 			Namespace:   defaultNacosNamespace,
@@ -327,67 +264,6 @@ func (c *Config) validate() error {
 		c.Database.ConnectTimeout = Duration(defaultDatabaseConnectTime)
 	}
 
-	c.Attendance.Timezone = strings.TrimSpace(c.Attendance.Timezone)
-	if c.Attendance.Timezone == "" {
-		c.Attendance.Timezone = "Asia/Shanghai"
-	}
-	c.Attendance.DefaultShiftID = strings.TrimSpace(c.Attendance.DefaultShiftID)
-	if c.Attendance.DefaultShiftID == "" {
-		c.Attendance.DefaultShiftID = "day"
-	}
-	c.Attendance.WeekendDays = trimStringSlice(c.Attendance.WeekendDays)
-	c.Attendance.Workdays = trimStringSlice(c.Attendance.Workdays)
-	for index := range c.Attendance.Holidays {
-		c.Attendance.Holidays[index].Date = strings.TrimSpace(c.Attendance.Holidays[index].Date)
-		c.Attendance.Holidays[index].Name = strings.TrimSpace(c.Attendance.Holidays[index].Name)
-	}
-	if len(c.Attendance.Shifts) == 0 {
-		c.Attendance.Shifts = []AttendanceShiftConfig{
-			{
-				ID:        "day",
-				Name:      "Day Shift",
-				StartTime: "09:00",
-				EndTime:   "18:00",
-				Enabled:   boolPtr(true),
-			},
-		}
-	}
-	for index := range c.Attendance.Shifts {
-		shift := &c.Attendance.Shifts[index]
-		shift.ID = strings.TrimSpace(shift.ID)
-		if shift.ID == "" {
-			return fmt.Errorf("config error: attendance.shifts[%d].id cannot be empty", index)
-		}
-		shift.Name = strings.TrimSpace(shift.Name)
-		shift.StartTime = strings.TrimSpace(shift.StartTime)
-		if shift.StartTime == "" {
-			shift.StartTime = "09:00"
-		}
-		shift.EndTime = strings.TrimSpace(shift.EndTime)
-		if shift.EndTime == "" {
-			shift.EndTime = "18:00"
-		}
-		if shift.Enabled == nil {
-			shift.Enabled = boolPtr(true)
-		}
-	}
-	for index := range c.Attendance.Schedules {
-		schedule := &c.Attendance.Schedules[index]
-		schedule.UserID = strings.TrimSpace(schedule.UserID)
-		schedule.DeviceSN = strings.TrimSpace(schedule.DeviceSN)
-		schedule.Date = strings.TrimSpace(schedule.Date)
-		schedule.ShiftID = strings.TrimSpace(schedule.ShiftID)
-		schedule.Reason = strings.TrimSpace(schedule.Reason)
-	}
-	for index := range c.Attendance.WeeklySchedules {
-		schedule := &c.Attendance.WeeklySchedules[index]
-		schedule.UserID = strings.TrimSpace(schedule.UserID)
-		schedule.DeviceSN = strings.TrimSpace(schedule.DeviceSN)
-		schedule.Weekday = strings.TrimSpace(schedule.Weekday)
-		schedule.ShiftID = strings.TrimSpace(schedule.ShiftID)
-		schedule.Reason = strings.TrimSpace(schedule.Reason)
-	}
-
 	c.Nacos.Address = strings.TrimSpace(c.Nacos.Address)
 	if c.Nacos.Address == "" {
 		c.Nacos.Address = defaultNacosAddress
@@ -451,22 +327,6 @@ func (c *Config) validate() error {
 	}
 
 	return nil
-}
-
-func trimStringSlice(values []string) []string {
-	trimmed := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			trimmed = append(trimmed, value)
-		}
-	}
-
-	return trimmed
-}
-
-func boolPtr(value bool) *bool {
-	return &value
 }
 
 func validLogLevel(level string) bool {

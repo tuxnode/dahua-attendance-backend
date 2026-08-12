@@ -26,23 +26,69 @@ type fakeService struct {
 	dailyRecords       []domain.DailyAttendance
 	monthlyRecords     []domain.MonthlyAttendance
 	summary            domain.AttendanceSummary
+	settings           domain.AttendanceSettings
+	shifts             []domain.AttendanceShift
+	calendarDays       []domain.AttendanceCalendarDay
+	schedules          []domain.ManagedAttendanceSchedule
+	weeklySchedules    []domain.ManagedAttendanceWeeklySchedule
 	query              domain.AttendanceRecordQuery
 	dailyQuery         domain.DailyAttendanceQuery
 	monthlyQuery       domain.MonthlyAttendanceQuery
 	summaryQuery       domain.AttendanceSummaryQuery
 	exceptionQuery     domain.AttendanceExceptionQuery
+	shiftQuery         domain.AttendanceShiftQuery
+	calendarDayQuery   domain.AttendanceCalendarDayQuery
+	scheduleQuery      domain.AttendanceScheduleQuery
+	weeklyScheduleQuery domain.AttendanceWeeklyScheduleQuery
+	savedSettings      domain.AttendanceSettings
+	savedShift         domain.AttendanceShift
+	deletedShiftID     string
+	savedCalendarDay   domain.AttendanceCalendarDay
+	deletedCalendarDay time.Time
+	savedSchedule      domain.ManagedAttendanceSchedule
+	deletedScheduleID  int64
+	savedWeeklySchedule domain.ManagedAttendanceWeeklySchedule
+	deletedWeeklyScheduleID int64
 	handleErr          error
 	listErr            error
 	listDailyErr       error
 	listMonthlyErr     error
 	summaryErr         error
 	listExceptionErr   error
+	settingsErr        error
+	saveSettingsErr    error
+	listShiftsErr      error
+	saveShiftErr       error
+	deleteShiftErr     error
+	listCalendarDaysErr error
+	saveCalendarDayErr error
+	deleteCalendarDayErr error
+	listSchedulesErr   error
+	saveScheduleErr    error
+	deleteScheduleErr  error
+	listWeeklySchedulesErr error
+	saveWeeklyScheduleErr error
+	deleteWeeklyScheduleErr error
 	handleDeviceCalls  int
 	listRecordsCalls   int
 	listDailyCalls     int
 	listMonthlyCalls   int
 	summaryCalls       int
 	listExceptionCalls int
+	getSettingsCalls   int
+	saveSettingsCalls  int
+	listShiftsCalls    int
+	saveShiftCalls     int
+	deleteShiftCalls   int
+	listCalendarDaysCalls int
+	saveCalendarDayCalls int
+	deleteCalendarDayCalls int
+	listSchedulesCalls int
+	saveScheduleCalls  int
+	deleteScheduleCalls int
+	listWeeklySchedulesCalls int
+	saveWeeklyScheduleCalls int
+	deleteWeeklyScheduleCalls int
 }
 
 func (s *fakeService) HandleDevicePayload(_ context.Context, payload *parser.ParsedPayload) error {
@@ -94,6 +140,125 @@ func (s *fakeService) ListAttendanceExceptions(_ context.Context, query domain.A
 		return nil, s.listExceptionErr
 	}
 	return append([]domain.DailyAttendance(nil), s.dailyRecords...), nil
+}
+
+func (s *fakeService) GetAttendanceSettings(_ context.Context) (domain.AttendanceSettings, error) {
+	s.getSettingsCalls++
+	if s.settingsErr != nil {
+		return domain.AttendanceSettings{}, s.settingsErr
+	}
+	return s.settings, nil
+}
+
+func (s *fakeService) SaveAttendanceSettings(_ context.Context, settings domain.AttendanceSettings) (domain.AttendanceSettings, error) {
+	s.saveSettingsCalls++
+	s.savedSettings = settings
+	if s.saveSettingsErr != nil {
+		return domain.AttendanceSettings{}, s.saveSettingsErr
+	}
+	return settings, nil
+}
+
+func (s *fakeService) ListAttendanceShifts(_ context.Context, query domain.AttendanceShiftQuery) ([]domain.AttendanceShift, error) {
+	s.listShiftsCalls++
+	s.shiftQuery = query
+	if s.listShiftsErr != nil {
+		return nil, s.listShiftsErr
+	}
+	return append([]domain.AttendanceShift(nil), s.shifts...), nil
+}
+
+func (s *fakeService) SaveAttendanceShift(_ context.Context, shift domain.AttendanceShift) (domain.AttendanceShift, error) {
+	s.saveShiftCalls++
+	s.savedShift = shift
+	if s.saveShiftErr != nil {
+		return domain.AttendanceShift{}, s.saveShiftErr
+	}
+	return shift, nil
+}
+
+func (s *fakeService) DeleteAttendanceShift(_ context.Context, id string) error {
+	s.deleteShiftCalls++
+	s.deletedShiftID = id
+	return s.deleteShiftErr
+}
+
+func (s *fakeService) ListAttendanceCalendarDays(_ context.Context, query domain.AttendanceCalendarDayQuery) ([]domain.AttendanceCalendarDay, error) {
+	s.listCalendarDaysCalls++
+	s.calendarDayQuery = query
+	if s.listCalendarDaysErr != nil {
+		return nil, s.listCalendarDaysErr
+	}
+	return append([]domain.AttendanceCalendarDay(nil), s.calendarDays...), nil
+}
+
+func (s *fakeService) SaveAttendanceCalendarDay(_ context.Context, day domain.AttendanceCalendarDay) (domain.AttendanceCalendarDay, error) {
+	s.saveCalendarDayCalls++
+	s.savedCalendarDay = day
+	if s.saveCalendarDayErr != nil {
+		return domain.AttendanceCalendarDay{}, s.saveCalendarDayErr
+	}
+	return day, nil
+}
+
+func (s *fakeService) DeleteAttendanceCalendarDay(_ context.Context, date time.Time) error {
+	s.deleteCalendarDayCalls++
+	s.deletedCalendarDay = date
+	return s.deleteCalendarDayErr
+}
+
+func (s *fakeService) ListAttendanceSchedules(_ context.Context, query domain.AttendanceScheduleQuery) ([]domain.ManagedAttendanceSchedule, error) {
+	s.listSchedulesCalls++
+	s.scheduleQuery = query
+	if s.listSchedulesErr != nil {
+		return nil, s.listSchedulesErr
+	}
+	return append([]domain.ManagedAttendanceSchedule(nil), s.schedules...), nil
+}
+
+func (s *fakeService) SaveAttendanceSchedule(_ context.Context, schedule domain.ManagedAttendanceSchedule) (domain.ManagedAttendanceSchedule, error) {
+	s.saveScheduleCalls++
+	s.savedSchedule = schedule
+	if s.saveScheduleErr != nil {
+		return domain.ManagedAttendanceSchedule{}, s.saveScheduleErr
+	}
+	if schedule.ID == 0 {
+		schedule.ID = 1
+	}
+	return schedule, nil
+}
+
+func (s *fakeService) DeleteAttendanceSchedule(_ context.Context, id int64) error {
+	s.deleteScheduleCalls++
+	s.deletedScheduleID = id
+	return s.deleteScheduleErr
+}
+
+func (s *fakeService) ListAttendanceWeeklySchedules(_ context.Context, query domain.AttendanceWeeklyScheduleQuery) ([]domain.ManagedAttendanceWeeklySchedule, error) {
+	s.listWeeklySchedulesCalls++
+	s.weeklyScheduleQuery = query
+	if s.listWeeklySchedulesErr != nil {
+		return nil, s.listWeeklySchedulesErr
+	}
+	return append([]domain.ManagedAttendanceWeeklySchedule(nil), s.weeklySchedules...), nil
+}
+
+func (s *fakeService) SaveAttendanceWeeklySchedule(_ context.Context, schedule domain.ManagedAttendanceWeeklySchedule) (domain.ManagedAttendanceWeeklySchedule, error) {
+	s.saveWeeklyScheduleCalls++
+	s.savedWeeklySchedule = schedule
+	if s.saveWeeklyScheduleErr != nil {
+		return domain.ManagedAttendanceWeeklySchedule{}, s.saveWeeklyScheduleErr
+	}
+	if schedule.ID == 0 {
+		schedule.ID = 1
+	}
+	return schedule, nil
+}
+
+func (s *fakeService) DeleteAttendanceWeeklySchedule(_ context.Context, id int64) error {
+	s.deleteWeeklyScheduleCalls++
+	s.deletedWeeklyScheduleID = id
+	return s.deleteWeeklyScheduleErr
 }
 
 func TestHandleDeviceEventsAcceptsRootJSON(t *testing.T) {

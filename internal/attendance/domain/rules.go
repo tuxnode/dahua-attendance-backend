@@ -13,6 +13,7 @@ type AttendanceRules struct {
 	WeekendDays     map[time.Weekday]bool
 	Holidays        map[string]string
 	Workdays        map[string]bool
+	CalendarDays    map[string]AttendanceCalendarDay
 	Shifts          map[string]AttendanceShift
 	Schedules       []AttendanceSchedule
 	WeeklySchedules []AttendanceWeeklySchedule

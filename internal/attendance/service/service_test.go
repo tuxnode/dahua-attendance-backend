@@ -3,6 +3,7 @@ package service_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -44,6 +45,62 @@ func (r *fakeRepository) ListAttendanceRecords(_ context.Context, query domain.A
 	}
 	r.query = query
 	return append([]domain.AttendanceRecord(nil), r.attendanceRecords...), nil
+}
+
+func (r *fakeRepository) GetAttendanceSettings(_ context.Context) (domain.AttendanceSettings, error) {
+	return domain.AttendanceSettings{}, sql.ErrNoRows
+}
+
+func (r *fakeRepository) SaveAttendanceSettings(_ context.Context, _ domain.AttendanceSettings) error {
+	return nil
+}
+
+func (r *fakeRepository) ListAttendanceShifts(_ context.Context, _ domain.AttendanceShiftQuery) ([]domain.AttendanceShift, error) {
+	return nil, nil
+}
+
+func (r *fakeRepository) SaveAttendanceShift(_ context.Context, _ domain.AttendanceShift) error {
+	return nil
+}
+
+func (r *fakeRepository) DeleteAttendanceShift(_ context.Context, _ string) error {
+	return nil
+}
+
+func (r *fakeRepository) ListAttendanceCalendarDays(_ context.Context, _ domain.AttendanceCalendarDayQuery) ([]domain.AttendanceCalendarDay, error) {
+	return nil, nil
+}
+
+func (r *fakeRepository) SaveAttendanceCalendarDay(_ context.Context, _ domain.AttendanceCalendarDay) error {
+	return nil
+}
+
+func (r *fakeRepository) DeleteAttendanceCalendarDay(_ context.Context, _ time.Time) error {
+	return nil
+}
+
+func (r *fakeRepository) ListAttendanceSchedules(_ context.Context, _ domain.AttendanceScheduleQuery) ([]domain.ManagedAttendanceSchedule, error) {
+	return nil, nil
+}
+
+func (r *fakeRepository) SaveAttendanceSchedule(_ context.Context, schedule domain.ManagedAttendanceSchedule) (domain.ManagedAttendanceSchedule, error) {
+	return schedule, nil
+}
+
+func (r *fakeRepository) DeleteAttendanceSchedule(_ context.Context, _ int64) error {
+	return nil
+}
+
+func (r *fakeRepository) ListAttendanceWeeklySchedules(_ context.Context, _ domain.AttendanceWeeklyScheduleQuery) ([]domain.ManagedAttendanceWeeklySchedule, error) {
+	return nil, nil
+}
+
+func (r *fakeRepository) SaveAttendanceWeeklySchedule(_ context.Context, schedule domain.ManagedAttendanceWeeklySchedule) (domain.ManagedAttendanceWeeklySchedule, error) {
+	return schedule, nil
+}
+
+func (r *fakeRepository) DeleteAttendanceWeeklySchedule(_ context.Context, _ int64) error {
+	return nil
 }
 
 func TestHandleDevicePayloadWritesAttendanceRecord(t *testing.T) {

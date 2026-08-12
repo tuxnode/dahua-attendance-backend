@@ -37,45 +37,6 @@ max_idle_conns = 8
 conn_max_lifetime = "10m"
 connect_timeout = "7s"
 
-[attendance]
-timezone = "Asia/Shanghai"
-default_shift_id = "day"
-weekend_days = ["saturday", "sunday"]
-workdays = ["2026-09-26"]
-
-[[attendance.holidays]]
-date = "2026-10-01"
-name = "national_day"
-
-[[attendance.shifts]]
-id = "day"
-name = "Day Shift"
-start_time = "09:00"
-end_time = "18:00"
-late_grace_minutes = 5
-early_leave_grace_minutes = 5
-flexible_minutes = 10
-enabled = true
-
-[[attendance.shifts]]
-id = "night"
-name = "Night Shift"
-start_time = "21:00"
-end_time = "06:00"
-late_grace_minutes = 3
-early_leave_grace_minutes = 3
-flexible_minutes = 0
-enabled = true
-
-[[attendance.schedules]]
-user_id = "REDACTED_USER_ID"
-date = "2026-08-10"
-shift_id = "night"
-
-[[attendance.weekly_schedules]]
-weekday = "monday"
-shift_id = "day"
-
 [nacos]
 enabled = true
 address = "127.0.0.1:8848"
@@ -128,33 +89,6 @@ file_path = "/tmp/attendance.log"
 	}
 	if cfg.Database.ConnectTimeout.Std() != 7*time.Second {
 		t.Fatalf("unexpected connect timeout: %s", cfg.Database.ConnectTimeout)
-	}
-	if cfg.Attendance.Timezone != "Asia/Shanghai" {
-		t.Fatalf("unexpected attendance timezone: %s", cfg.Attendance.Timezone)
-	}
-	if cfg.Attendance.DefaultShiftID != "day" {
-		t.Fatalf("unexpected default shift id: %s", cfg.Attendance.DefaultShiftID)
-	}
-	if len(cfg.Attendance.WeekendDays) != 2 {
-		t.Fatalf("unexpected weekend days: %+v", cfg.Attendance.WeekendDays)
-	}
-	if len(cfg.Attendance.Workdays) != 1 {
-		t.Fatalf("unexpected workdays: %+v", cfg.Attendance.Workdays)
-	}
-	if len(cfg.Attendance.Holidays) != 1 {
-		t.Fatalf("unexpected holidays: %+v", cfg.Attendance.Holidays)
-	}
-	if len(cfg.Attendance.Shifts) != 2 {
-		t.Fatalf("unexpected shifts: %+v", cfg.Attendance.Shifts)
-	}
-	if cfg.Attendance.Shifts[0].FlexibleMinutes != 10 {
-		t.Fatalf("unexpected flexible minutes: %d", cfg.Attendance.Shifts[0].FlexibleMinutes)
-	}
-	if len(cfg.Attendance.Schedules) != 1 {
-		t.Fatalf("unexpected schedules: %+v", cfg.Attendance.Schedules)
-	}
-	if len(cfg.Attendance.WeeklySchedules) != 1 {
-		t.Fatalf("unexpected weekly schedules: %+v", cfg.Attendance.WeeklySchedules)
 	}
 	if !cfg.Nacos.Enabled {
 		t.Fatal("expected nacos to be enabled")
@@ -220,18 +154,6 @@ dsn = "user:password@tcp(127.0.0.1:3306)/attendance?parseTime=true"
 	if cfg.Log.Level != "info" {
 		t.Fatalf("unexpected log level: %s", cfg.Log.Level)
 	}
-	if cfg.Attendance.Timezone != "Asia/Shanghai" {
-		t.Fatalf("unexpected attendance timezone: %s", cfg.Attendance.Timezone)
-	}
-	if cfg.Attendance.DefaultShiftID != "day" {
-		t.Fatalf("unexpected default shift id: %s", cfg.Attendance.DefaultShiftID)
-	}
-	if len(cfg.Attendance.Shifts) != 1 {
-		t.Fatalf("unexpected default shifts: %+v", cfg.Attendance.Shifts)
-	}
-	if len(cfg.Attendance.WeekendDays) != 2 {
-		t.Fatalf("unexpected default weekend days: %+v", cfg.Attendance.WeekendDays)
-	}
 	if cfg.Nacos.Enabled {
 		t.Fatal("expected nacos to be disabled by default")
 	}
@@ -249,33 +171,6 @@ dsn = "user:password@tcp(127.0.0.1:3306)/attendance?parseTime=true"
 	}
 	if !cfg.Nacos.Ephemeral {
 		t.Fatal("expected nacos ephemeral default")
-	}
-}
-
-func TestLoadKeepsDisabledAttendanceShift(t *testing.T) {
-	path := writeConfigFile(t, `
-[app]
-name = "attendance"
-
-[database]
-dsn = "user:password@tcp(127.0.0.1:3306)/attendance?parseTime=true"
-
-[[attendance.shifts]]
-id = "disabled"
-start_time = "09:00"
-end_time = "18:00"
-enabled = false
-`)
-
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	if len(cfg.Attendance.Shifts) != 1 {
-		t.Fatalf("unexpected shifts: %+v", cfg.Attendance.Shifts)
-	}
-	if cfg.Attendance.Shifts[0].Enabled == nil || *cfg.Attendance.Shifts[0].Enabled {
-		t.Fatalf("expected disabled shift, got %+v", cfg.Attendance.Shifts[0].Enabled)
 	}
 }
 

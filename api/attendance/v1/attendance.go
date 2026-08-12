@@ -65,6 +65,136 @@ type ListAttendanceExceptionsResponse struct {
 	Records []DailyAttendanceDTO `json:"records"`
 }
 
+type AttendanceSettingsDTO struct {
+	Timezone       string   `json:"timezone"`
+	DefaultShiftID string   `json:"default_shift_id"`
+	WeekendDays    []string `json:"weekend_days"`
+}
+
+type GetAttendanceSettingsResponse struct {
+	Settings AttendanceSettingsDTO `json:"settings"`
+}
+
+type SaveAttendanceSettingsRequest struct {
+	Timezone       string   `json:"timezone"`
+	DefaultShiftID string   `json:"default_shift_id"`
+	WeekendDays    []string `json:"weekend_days"`
+}
+
+type SaveAttendanceSettingsResponse struct {
+	Settings AttendanceSettingsDTO `json:"settings"`
+}
+
+type AttendanceShiftDTO struct {
+	ID                     string `json:"id"`
+	Name                   string `json:"name"`
+	StartTime              string `json:"start_time"`
+	EndTime                string `json:"end_time"`
+	LateGraceMinutes       int    `json:"late_grace_minutes"`
+	EarlyLeaveGraceMinutes int    `json:"early_leave_grace_minutes"`
+	FlexibleMinutes        int    `json:"flexible_minutes"`
+	Enabled                bool   `json:"enabled"`
+}
+
+type ListAttendanceShiftsResponse struct {
+	Records []AttendanceShiftDTO `json:"records"`
+}
+
+type SaveAttendanceShiftRequest struct {
+	ID                     string `json:"id"`
+	Name                   string `json:"name"`
+	StartTime              string `json:"start_time"`
+	EndTime                string `json:"end_time"`
+	LateGraceMinutes       int    `json:"late_grace_minutes"`
+	EarlyLeaveGraceMinutes int    `json:"early_leave_grace_minutes"`
+	FlexibleMinutes        int    `json:"flexible_minutes"`
+	Enabled                *bool  `json:"enabled"`
+}
+
+type SaveAttendanceShiftResponse struct {
+	Record AttendanceShiftDTO `json:"record"`
+}
+
+type AttendanceCalendarDayDTO struct {
+	Date    string `json:"date"`
+	DayType string `json:"day_type"`
+	Name    string `json:"name"`
+}
+
+type ListAttendanceCalendarDaysResponse struct {
+	Records []AttendanceCalendarDayDTO `json:"records"`
+}
+
+type SaveAttendanceCalendarDayRequest struct {
+	Date    string `json:"date"`
+	DayType string `json:"day_type"`
+	Name    string `json:"name"`
+}
+
+type SaveAttendanceCalendarDayResponse struct {
+	Record AttendanceCalendarDayDTO `json:"record"`
+}
+
+type AttendanceScheduleDTO struct {
+	ID       int64  `json:"id"`
+	UserID   string `json:"user_id"`
+	DeviceSN string `json:"device_sn"`
+	Date     string `json:"date"`
+	ShiftID  string `json:"shift_id"`
+	Rest     bool   `json:"rest"`
+	Reason   string `json:"reason"`
+	Enabled  bool   `json:"enabled"`
+}
+
+type ListAttendanceSchedulesResponse struct {
+	Records []AttendanceScheduleDTO `json:"records"`
+}
+
+type SaveAttendanceScheduleRequest struct {
+	ID       int64  `json:"id"`
+	UserID   string `json:"user_id"`
+	DeviceSN string `json:"device_sn"`
+	Date     string `json:"date"`
+	ShiftID  string `json:"shift_id"`
+	Rest     bool   `json:"rest"`
+	Reason   string `json:"reason"`
+	Enabled  *bool  `json:"enabled"`
+}
+
+type SaveAttendanceScheduleResponse struct {
+	Record AttendanceScheduleDTO `json:"record"`
+}
+
+type AttendanceWeeklyScheduleDTO struct {
+	ID       int64  `json:"id"`
+	UserID   string `json:"user_id"`
+	DeviceSN string `json:"device_sn"`
+	Weekday  string `json:"weekday"`
+	ShiftID  string `json:"shift_id"`
+	Rest     bool   `json:"rest"`
+	Reason   string `json:"reason"`
+	Enabled  bool   `json:"enabled"`
+}
+
+type ListAttendanceWeeklySchedulesResponse struct {
+	Records []AttendanceWeeklyScheduleDTO `json:"records"`
+}
+
+type SaveAttendanceWeeklyScheduleRequest struct {
+	ID       int64  `json:"id"`
+	UserID   string `json:"user_id"`
+	DeviceSN string `json:"device_sn"`
+	Weekday  string `json:"weekday"`
+	ShiftID  string `json:"shift_id"`
+	Rest     bool   `json:"rest"`
+	Reason   string `json:"reason"`
+	Enabled  *bool  `json:"enabled"`
+}
+
+type SaveAttendanceWeeklyScheduleResponse struct {
+	Record AttendanceWeeklyScheduleDTO `json:"record"`
+}
+
 type AttendanceRecordDTO struct {
 	UserID        string `json:"user_id"`
 	UserName      string `json:"user_name"`

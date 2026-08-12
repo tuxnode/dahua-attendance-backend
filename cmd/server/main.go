@@ -5,18 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"flag"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
-	"time"
 
-	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/domain"
 	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/repository"
 	"github.com/tuxnode/dahua-attendance-backend/internal/attendance/service"
 	"github.com/tuxnode/dahua-attendance-backend/internal/config"
@@ -41,13 +36,7 @@ func main() {
 	defer closeLogger()
 	slog.SetDefault(logger)
 
-	rules, err := buildAttendanceRules(cfg.Attendance)
-	if err != nil {
-		logger.Error("build attendance rules failed", "error", err)
-		os.Exit(1)
-	}
-
-	attendanceService, cleanup := buildAttendanceService(cfg.Database, rules, logger)
+	attendanceService, cleanup := buildAttendanceService(cfg.Database, logger)
 	defer cleanup()
 
 	router := transporthttp.NewRouter(
@@ -98,6 +87,11 @@ func main() {
 				transporthttp.MonthlyAttendancePath,
 				transporthttp.AttendanceSummaryPath,
 				transporthttp.AttendanceExceptionsPath,
+				transporthttp.AttendanceSettingsPath,
+				transporthttp.AttendanceShiftsPath,
+				transporthttp.AttendanceCalendarDaysPath,
+				transporthttp.AttendanceSchedulesPath,
+				transporthttp.AttendanceWeeklySchedulesPath,
 			},
 			"health_path", "/healthz",
 		)
@@ -136,7 +130,7 @@ func main() {
 	logger.Info("gin HTTP server stopped")
 }
 
-func buildAttendanceService(cfg config.DatabaseConfig, rules domain.AttendanceRules, logger *slog.Logger) (*service.Service, func()) {
+func buildAttendanceService(cfg config.DatabaseConfig, logger *slog.Logger) (*service.Service, func()) {
 	db, err := sql.Open(cfg.Driver, cfg.DSN)
 	if err != nil {
 		logger.Error("open database failed", "driver", cfg.Driver, "error", err)
@@ -165,162 +159,10 @@ func buildAttendanceService(cfg config.DatabaseConfig, rules domain.AttendanceRu
 
 	logger.Info("database repository enabled", "driver", cfg.Driver)
 
-	return service.New(store, service.WithLogger(logger), service.WithAttendanceRules(rules)), func() {
+	return service.New(store, service.WithLogger(logger)), func() {
 		if err := db.Close(); err != nil {
 			logger.Warn("close database failed", "error", err)
 		}
-	}
-}
-
-func buildAttendanceRules(cfg config.AttendanceConfig) (domain.AttendanceRules, error) {
-	location, err := time.LoadLocation(cfg.Timezone)
-	if err != nil {
-		return domain.AttendanceRules{}, fmt.Errorf("load attendance timezone %q: %w", cfg.Timezone, err)
-	}
-
-	rules := domain.AttendanceRules{
-		Location:        location,
-		DefaultShiftID:  cfg.DefaultShiftID,
-		WeekendDays:     make(map[time.Weekday]bool),
-		Holidays:        make(map[string]string),
-		Workdays:        make(map[string]bool),
-		Shifts:          make(map[string]domain.AttendanceShift),
-		Schedules:       make([]domain.AttendanceSchedule, 0, len(cfg.Schedules)),
-		WeeklySchedules: make([]domain.AttendanceWeeklySchedule, 0, len(cfg.WeeklySchedules)),
-	}
-
-	for _, value := range cfg.WeekendDays {
-		weekday, err := parseWeekday(value)
-		if err != nil {
-			return domain.AttendanceRules{}, err
-		}
-		rules.WeekendDays[weekday] = true
-	}
-	for _, value := range cfg.Workdays {
-		date, err := parseConfigDate(value, location)
-		if err != nil {
-			return domain.AttendanceRules{}, fmt.Errorf("parse attendance workday: %w", err)
-		}
-		rules.Workdays[date.Format("2006-01-02")] = true
-	}
-	for _, holiday := range cfg.Holidays {
-		date, err := parseConfigDate(holiday.Date, location)
-		if err != nil {
-			return domain.AttendanceRules{}, fmt.Errorf("parse attendance holiday: %w", err)
-		}
-		rules.Holidays[date.Format("2006-01-02")] = holiday.Name
-	}
-	for _, shift := range cfg.Shifts {
-		attendanceShift, err := buildAttendanceShift(shift)
-		if err != nil {
-			return domain.AttendanceRules{}, err
-		}
-		rules.Shifts[attendanceShift.ID] = attendanceShift
-	}
-	for _, schedule := range cfg.Schedules {
-		date, err := parseConfigDate(schedule.Date, location)
-		if err != nil {
-			return domain.AttendanceRules{}, fmt.Errorf("parse attendance schedule date: %w", err)
-		}
-		rules.Schedules = append(rules.Schedules, domain.AttendanceSchedule{
-			UserID:   schedule.UserID,
-			DeviceSN: schedule.DeviceSN,
-			Date:     date,
-			ShiftID:  schedule.ShiftID,
-			Rest:     schedule.Rest,
-			Reason:   schedule.Reason,
-		})
-	}
-	for _, schedule := range cfg.WeeklySchedules {
-		weekday, err := parseWeekday(schedule.Weekday)
-		if err != nil {
-			return domain.AttendanceRules{}, err
-		}
-		rules.WeeklySchedules = append(rules.WeeklySchedules, domain.AttendanceWeeklySchedule{
-			UserID:   schedule.UserID,
-			DeviceSN: schedule.DeviceSN,
-			Weekday:  weekday,
-			ShiftID:  schedule.ShiftID,
-			Rest:     schedule.Rest,
-			Reason:   schedule.Reason,
-		})
-	}
-
-	return rules, nil
-}
-
-func buildAttendanceShift(cfg config.AttendanceShiftConfig) (domain.AttendanceShift, error) {
-	start, err := parseClockTime(cfg.StartTime)
-	if err != nil {
-		return domain.AttendanceShift{}, fmt.Errorf("parse attendance shift %q start_time: %w", cfg.ID, err)
-	}
-	end, err := parseClockTime(cfg.EndTime)
-	if err != nil {
-		return domain.AttendanceShift{}, fmt.Errorf("parse attendance shift %q end_time: %w", cfg.ID, err)
-	}
-
-	name := cfg.Name
-	if strings.TrimSpace(name) == "" {
-		name = cfg.ID
-	}
-
-	return domain.AttendanceShift{
-		ID:              cfg.ID,
-		Name:            name,
-		Start:           start,
-		End:             end,
-		LateGrace:       time.Duration(cfg.LateGraceMinutes) * time.Minute,
-		EarlyLeaveGrace: time.Duration(cfg.EarlyLeaveGraceMinutes) * time.Minute,
-		Flexible:        time.Duration(cfg.FlexibleMinutes) * time.Minute,
-		Enabled:         cfg.Enabled == nil || *cfg.Enabled,
-	}, nil
-}
-
-func parseConfigDate(value string, location *time.Location) (time.Time, error) {
-	date, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(value), location)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("%q must use YYYY-MM-DD format", value)
-	}
-
-	return date, nil
-}
-
-func parseClockTime(value string) (domain.ClockTime, error) {
-	parts := strings.Split(strings.TrimSpace(value), ":")
-	if len(parts) != 2 {
-		return domain.ClockTime{}, fmt.Errorf("%q must use HH:MM format", value)
-	}
-
-	hour, err := strconv.Atoi(parts[0])
-	if err != nil || hour < 0 || hour > 23 {
-		return domain.ClockTime{}, fmt.Errorf("invalid hour %q", parts[0])
-	}
-	minute, err := strconv.Atoi(parts[1])
-	if err != nil || minute < 0 || minute > 59 {
-		return domain.ClockTime{}, fmt.Errorf("invalid minute %q", parts[1])
-	}
-
-	return domain.ClockTime{Hour: hour, Minute: minute}, nil
-}
-
-func parseWeekday(value string) (time.Weekday, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "0", "sunday", "sun":
-		return time.Sunday, nil
-	case "1", "monday", "mon":
-		return time.Monday, nil
-	case "2", "tuesday", "tue":
-		return time.Tuesday, nil
-	case "3", "wednesday", "wed":
-		return time.Wednesday, nil
-	case "4", "thursday", "thu":
-		return time.Thursday, nil
-	case "5", "friday", "fri":
-		return time.Friday, nil
-	case "6", "saturday", "sat":
-		return time.Saturday, nil
-	default:
-		return 0, fmt.Errorf("unsupported weekday %q", value)
 	}
 }
 

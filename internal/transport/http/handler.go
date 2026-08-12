@@ -25,6 +25,15 @@ const (
 	MonthlyAttendancePath    = "/api/v1/attendance/monthly"
 	AttendanceSummaryPath    = "/api/v1/attendance/summary"
 	AttendanceExceptionsPath = "/api/v1/attendance/exceptions"
+	AttendanceSettingsPath   = "/api/v1/attendance/settings"
+	AttendanceShiftsPath     = "/api/v1/attendance/shifts"
+	AttendanceShiftPath      = "/api/v1/attendance/shifts/:id"
+	AttendanceCalendarDaysPath = "/api/v1/attendance/calendar-days"
+	AttendanceCalendarDayPath  = "/api/v1/attendance/calendar-days/:date"
+	AttendanceSchedulesPath    = "/api/v1/attendance/schedules"
+	AttendanceSchedulePath     = "/api/v1/attendance/schedules/:id"
+	AttendanceWeeklySchedulesPath = "/api/v1/attendance/weekly-schedules"
+	AttendanceWeeklySchedulePath  = "/api/v1/attendance/weekly-schedules/:id"
 
 	queryDateLayout  = "2006-01-02"
 	queryMonthLayout = "2006-01"
@@ -48,11 +57,29 @@ type AttendanceStatsService interface {
 	ListAttendanceExceptions(ctx context.Context, query domain.AttendanceExceptionQuery) ([]domain.DailyAttendance, error)
 }
 
+type AttendanceRuleManagementService interface {
+	GetAttendanceSettings(ctx context.Context) (domain.AttendanceSettings, error)
+	SaveAttendanceSettings(ctx context.Context, settings domain.AttendanceSettings) (domain.AttendanceSettings, error)
+	ListAttendanceShifts(ctx context.Context, query domain.AttendanceShiftQuery) ([]domain.AttendanceShift, error)
+	SaveAttendanceShift(ctx context.Context, shift domain.AttendanceShift) (domain.AttendanceShift, error)
+	DeleteAttendanceShift(ctx context.Context, id string) error
+	ListAttendanceCalendarDays(ctx context.Context, query domain.AttendanceCalendarDayQuery) ([]domain.AttendanceCalendarDay, error)
+	SaveAttendanceCalendarDay(ctx context.Context, day domain.AttendanceCalendarDay) (domain.AttendanceCalendarDay, error)
+	DeleteAttendanceCalendarDay(ctx context.Context, date time.Time) error
+	ListAttendanceSchedules(ctx context.Context, query domain.AttendanceScheduleQuery) ([]domain.ManagedAttendanceSchedule, error)
+	SaveAttendanceSchedule(ctx context.Context, schedule domain.ManagedAttendanceSchedule) (domain.ManagedAttendanceSchedule, error)
+	DeleteAttendanceSchedule(ctx context.Context, id int64) error
+	ListAttendanceWeeklySchedules(ctx context.Context, query domain.AttendanceWeeklyScheduleQuery) ([]domain.ManagedAttendanceWeeklySchedule, error)
+	SaveAttendanceWeeklySchedule(ctx context.Context, schedule domain.ManagedAttendanceWeeklySchedule) (domain.ManagedAttendanceWeeklySchedule, error)
+	DeleteAttendanceWeeklySchedule(ctx context.Context, id int64) error
+}
+
 type AttendanceService interface {
 	EventConsumer
 	AttendanceQueryService
 	DailyAttendanceQueryService
 	AttendanceStatsService
+	AttendanceRuleManagementService
 }
 
 type Handler struct {
@@ -93,6 +120,24 @@ func NewRouter(service AttendanceService, opts ...Option) *gin.Engine {
 	router.GET(MonthlyAttendancePath, handler.HandleMonthlyAttendance)
 	router.GET(AttendanceSummaryPath, handler.HandleAttendanceSummary)
 	router.GET(AttendanceExceptionsPath, handler.HandleAttendanceExceptions)
+	router.GET(AttendanceSettingsPath, handler.HandleAttendanceSettings)
+	router.PUT(AttendanceSettingsPath, handler.HandleSaveAttendanceSettings)
+	router.GET(AttendanceShiftsPath, handler.HandleAttendanceShifts)
+	router.POST(AttendanceShiftsPath, handler.HandleSaveAttendanceShift)
+	router.PUT(AttendanceShiftPath, handler.HandleSaveAttendanceShift)
+	router.DELETE(AttendanceShiftPath, handler.HandleDeleteAttendanceShift)
+	router.GET(AttendanceCalendarDaysPath, handler.HandleAttendanceCalendarDays)
+	router.POST(AttendanceCalendarDaysPath, handler.HandleSaveAttendanceCalendarDay)
+	router.PUT(AttendanceCalendarDayPath, handler.HandleSaveAttendanceCalendarDay)
+	router.DELETE(AttendanceCalendarDayPath, handler.HandleDeleteAttendanceCalendarDay)
+	router.GET(AttendanceSchedulesPath, handler.HandleAttendanceSchedules)
+	router.POST(AttendanceSchedulesPath, handler.HandleSaveAttendanceSchedule)
+	router.PUT(AttendanceSchedulePath, handler.HandleSaveAttendanceSchedule)
+	router.DELETE(AttendanceSchedulePath, handler.HandleDeleteAttendanceSchedule)
+	router.GET(AttendanceWeeklySchedulesPath, handler.HandleAttendanceWeeklySchedules)
+	router.POST(AttendanceWeeklySchedulesPath, handler.HandleSaveAttendanceWeeklySchedule)
+	router.PUT(AttendanceWeeklySchedulePath, handler.HandleSaveAttendanceWeeklySchedule)
+	router.DELETE(AttendanceWeeklySchedulePath, handler.HandleDeleteAttendanceWeeklySchedule)
 
 	return router
 }
@@ -280,6 +325,336 @@ func (h *Handler) HandleAttendanceExceptions(c *gin.Context) {
 	})
 }
 
+func (h *Handler) HandleAttendanceSettings(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	settings, err := h.service.GetAttendanceSettings(c.Request.Context())
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "failed to get attendance settings")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.GetAttendanceSettingsResponse{
+		Settings: toAttendanceSettingsDTO(settings),
+	})
+}
+
+func (h *Handler) HandleSaveAttendanceSettings(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	var request attendancev1.SaveAttendanceSettingsRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+		return
+	}
+
+	settings, err := attendanceSettingsFromRequest(request)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	saved, err := h.service.SaveAttendanceSettings(c.Request.Context(), settings)
+	if err != nil {
+		writeManagementError(c, err, "failed to save attendance settings")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.SaveAttendanceSettingsResponse{
+		Settings: toAttendanceSettingsDTO(saved),
+	})
+}
+
+func (h *Handler) HandleAttendanceShifts(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	query, err := parseAttendanceShiftQuery(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	shifts, err := h.service.ListAttendanceShifts(c.Request.Context(), query)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "failed to list attendance shifts")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.ListAttendanceShiftsResponse{
+		Records: toAttendanceShiftDTOs(shifts),
+	})
+}
+
+func (h *Handler) HandleSaveAttendanceShift(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	var request attendancev1.SaveAttendanceShiftRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+		return
+	}
+
+	shift, err := attendanceShiftFromRequest(request, c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	saved, err := h.service.SaveAttendanceShift(c.Request.Context(), shift)
+	if err != nil {
+		writeManagementError(c, err, "failed to save attendance shift")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.SaveAttendanceShiftResponse{
+		Record: toAttendanceShiftDTO(saved),
+	})
+}
+
+func (h *Handler) HandleDeleteAttendanceShift(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		writeError(c, http.StatusBadRequest, "invalid_request", "id cannot be empty")
+		return
+	}
+	if err := h.service.DeleteAttendanceShift(c.Request.Context(), id); err != nil {
+		writeManagementError(c, err, "failed to delete attendance shift")
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) HandleAttendanceCalendarDays(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	query, err := parseAttendanceCalendarDayQuery(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	days, err := h.service.ListAttendanceCalendarDays(c.Request.Context(), query)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "failed to list attendance calendar days")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.ListAttendanceCalendarDaysResponse{
+		Records: toAttendanceCalendarDayDTOs(days),
+	})
+}
+
+func (h *Handler) HandleSaveAttendanceCalendarDay(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	var request attendancev1.SaveAttendanceCalendarDayRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+		return
+	}
+
+	day, err := attendanceCalendarDayFromRequest(request, c.Param("date"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	saved, err := h.service.SaveAttendanceCalendarDay(c.Request.Context(), day)
+	if err != nil {
+		writeManagementError(c, err, "failed to save attendance calendar day")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.SaveAttendanceCalendarDayResponse{
+		Record: toAttendanceCalendarDayDTO(saved),
+	})
+}
+
+func (h *Handler) HandleDeleteAttendanceCalendarDay(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	date, err := parseDateValue("date", c.Param("date"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if err := h.service.DeleteAttendanceCalendarDay(c.Request.Context(), date); err != nil {
+		writeManagementError(c, err, "failed to delete attendance calendar day")
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) HandleAttendanceSchedules(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	query, err := parseAttendanceScheduleQuery(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	schedules, err := h.service.ListAttendanceSchedules(c.Request.Context(), query)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "failed to list attendance schedules")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.ListAttendanceSchedulesResponse{
+		Records: toAttendanceScheduleDTOs(schedules),
+	})
+}
+
+func (h *Handler) HandleSaveAttendanceSchedule(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	var request attendancev1.SaveAttendanceScheduleRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+		return
+	}
+
+	schedule, err := attendanceScheduleFromRequest(request, c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	saved, err := h.service.SaveAttendanceSchedule(c.Request.Context(), schedule)
+	if err != nil {
+		writeManagementError(c, err, "failed to save attendance schedule")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.SaveAttendanceScheduleResponse{
+		Record: toAttendanceScheduleDTO(saved),
+	})
+}
+
+func (h *Handler) HandleDeleteAttendanceSchedule(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	id, err := parseIDParam(c, "id")
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if err := h.service.DeleteAttendanceSchedule(c.Request.Context(), id); err != nil {
+		writeManagementError(c, err, "failed to delete attendance schedule")
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) HandleAttendanceWeeklySchedules(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	query, err := parseAttendanceWeeklyScheduleQuery(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	schedules, err := h.service.ListAttendanceWeeklySchedules(c.Request.Context(), query)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "failed to list attendance weekly schedules")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.ListAttendanceWeeklySchedulesResponse{
+		Records: toAttendanceWeeklyScheduleDTOs(schedules),
+	})
+}
+
+func (h *Handler) HandleSaveAttendanceWeeklySchedule(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	var request attendancev1.SaveAttendanceWeeklyScheduleRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+		return
+	}
+
+	schedule, err := attendanceWeeklyScheduleFromRequest(request, c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	saved, err := h.service.SaveAttendanceWeeklySchedule(c.Request.Context(), schedule)
+	if err != nil {
+		writeManagementError(c, err, "failed to save attendance weekly schedule")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.SaveAttendanceWeeklyScheduleResponse{
+		Record: toAttendanceWeeklyScheduleDTO(saved),
+	})
+}
+
+func (h *Handler) HandleDeleteAttendanceWeeklySchedule(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	id, err := parseIDParam(c, "id")
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if err := h.service.DeleteAttendanceWeeklySchedule(c.Request.Context(), id); err != nil {
+		writeManagementError(c, err, "failed to delete attendance weekly schedule")
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 func writeDeviceSuccess(c *gin.Context) {
 	c.JSON(http.StatusOK, domain.Response{
 		Code:    0,
@@ -292,6 +667,28 @@ func writeError(c *gin.Context, status int, code string, message string) {
 		"code":    code,
 		"message": message,
 	})
+}
+
+func writeManagementError(c *gin.Context, err error, message string) {
+	if isValidationError(err) {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	writeError(c, http.StatusInternalServerError, "internal_server_error", message)
+}
+
+func isValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := err.Error()
+	return strings.Contains(message, "cannot be empty") ||
+		strings.Contains(message, "must be") ||
+		strings.Contains(message, "must not be") ||
+		strings.Contains(message, "invalid attendance") ||
+		strings.Contains(message, "unsupported attendance")
 }
 
 func parseAttendanceRecordQuery(c *gin.Context) (domain.AttendanceRecordQuery, error) {
@@ -414,6 +811,110 @@ func parseAttendanceExceptionQuery(c *gin.Context) (domain.AttendanceExceptionQu
 	}, nil
 }
 
+func parseAttendanceShiftQuery(c *gin.Context) (domain.AttendanceShiftQuery, error) {
+	includeDisabled, err := parseBoolQuery(c, "include_disabled")
+	if err != nil {
+		return domain.AttendanceShiftQuery{}, err
+	}
+	limit, err := parseIntQuery(c, "limit")
+	if err != nil {
+		return domain.AttendanceShiftQuery{}, err
+	}
+	offset, err := parseIntQuery(c, "offset")
+	if err != nil {
+		return domain.AttendanceShiftQuery{}, err
+	}
+
+	return domain.AttendanceShiftQuery{
+		IncludeDisabled: includeDisabled,
+		Limit:           limit,
+		Offset:          offset,
+	}, nil
+}
+
+func parseAttendanceCalendarDayQuery(c *gin.Context) (domain.AttendanceCalendarDayQuery, error) {
+	startDate, endDate, err := parseDateSelection(c)
+	if err != nil {
+		return domain.AttendanceCalendarDayQuery{}, err
+	}
+
+	dayType := domain.CalendarDayType(strings.TrimSpace(c.Query("day_type")))
+	if dayType != "" && !validCalendarDayType(dayType) {
+		return domain.AttendanceCalendarDayQuery{}, fmt.Errorf("unsupported day_type %q", dayType)
+	}
+
+	limit, err := parseIntQuery(c, "limit")
+	if err != nil {
+		return domain.AttendanceCalendarDayQuery{}, err
+	}
+	offset, err := parseIntQuery(c, "offset")
+	if err != nil {
+		return domain.AttendanceCalendarDayQuery{}, err
+	}
+
+	return domain.AttendanceCalendarDayQuery{
+		StartDate: startDate,
+		EndDate:   endDate,
+		DayType:   dayType,
+		Limit:     limit,
+		Offset:    offset,
+	}, nil
+}
+
+func parseAttendanceScheduleQuery(c *gin.Context) (domain.AttendanceScheduleQuery, error) {
+	startDate, endDate, err := parseDateSelection(c)
+	if err != nil {
+		return domain.AttendanceScheduleQuery{}, err
+	}
+
+	limit, err := parseIntQuery(c, "limit")
+	if err != nil {
+		return domain.AttendanceScheduleQuery{}, err
+	}
+	offset, err := parseIntQuery(c, "offset")
+	if err != nil {
+		return domain.AttendanceScheduleQuery{}, err
+	}
+
+	return domain.AttendanceScheduleQuery{
+		UserID:    strings.TrimSpace(c.Query("user_id")),
+		DeviceSN:  strings.TrimSpace(c.Query("device_sn")),
+		StartDate: startDate,
+		EndDate:   endDate,
+		Limit:     limit,
+		Offset:    offset,
+	}, nil
+}
+
+func parseAttendanceWeeklyScheduleQuery(c *gin.Context) (domain.AttendanceWeeklyScheduleQuery, error) {
+	var weekdayPtr *time.Weekday
+	weekdayValue := strings.TrimSpace(c.Query("weekday"))
+	if weekdayValue != "" {
+		weekday, err := parseWeekdayValue("weekday", weekdayValue)
+		if err != nil {
+			return domain.AttendanceWeeklyScheduleQuery{}, err
+		}
+		weekdayPtr = &weekday
+	}
+
+	limit, err := parseIntQuery(c, "limit")
+	if err != nil {
+		return domain.AttendanceWeeklyScheduleQuery{}, err
+	}
+	offset, err := parseIntQuery(c, "offset")
+	if err != nil {
+		return domain.AttendanceWeeklyScheduleQuery{}, err
+	}
+
+	return domain.AttendanceWeeklyScheduleQuery{
+		UserID:   strings.TrimSpace(c.Query("user_id")),
+		DeviceSN: strings.TrimSpace(c.Query("device_sn")),
+		Weekday:  weekdayPtr,
+		Limit:    limit,
+		Offset:   offset,
+	}, nil
+}
+
 func parseUnixQuery(c *gin.Context, key string) (time.Time, error) {
 	value := strings.TrimSpace(c.Query(key))
 	if value == "" {
@@ -505,6 +1006,370 @@ func parseIntQuery(c *gin.Context, key string) (int, error) {
 	}
 
 	return parsed, nil
+}
+
+func parseBoolQuery(c *gin.Context, key string) (bool, error) {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return false, nil
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean", key)
+	}
+
+	return parsed, nil
+}
+
+func parseIDParam(c *gin.Context, key string) (int64, error) {
+	value := strings.TrimSpace(c.Param(key))
+	if value == "" {
+		return 0, fmt.Errorf("%s cannot be empty", key)
+	}
+
+	id, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", key)
+	}
+
+	return id, nil
+}
+
+func attendanceSettingsFromRequest(request attendancev1.SaveAttendanceSettingsRequest) (domain.AttendanceSettings, error) {
+	weekendDays := make([]time.Weekday, 0, len(request.WeekendDays))
+	for _, value := range request.WeekendDays {
+		weekday, err := parseWeekdayValue("weekend_days", value)
+		if err != nil {
+			return domain.AttendanceSettings{}, err
+		}
+		weekendDays = append(weekendDays, weekday)
+	}
+
+	return domain.AttendanceSettings{
+		Timezone:       strings.TrimSpace(request.Timezone),
+		DefaultShiftID: strings.TrimSpace(request.DefaultShiftID),
+		WeekendDays:    weekendDays,
+	}, nil
+}
+
+func attendanceShiftFromRequest(request attendancev1.SaveAttendanceShiftRequest, pathID string) (domain.AttendanceShift, error) {
+	id := strings.TrimSpace(request.ID)
+	pathID = strings.TrimSpace(pathID)
+	if pathID != "" {
+		if id != "" && id != pathID {
+			return domain.AttendanceShift{}, errors.New("path id must match request id")
+		}
+		id = pathID
+	}
+
+	start, err := parseClockTimeValue("start_time", request.StartTime)
+	if err != nil {
+		return domain.AttendanceShift{}, err
+	}
+	end, err := parseClockTimeValue("end_time", request.EndTime)
+	if err != nil {
+		return domain.AttendanceShift{}, err
+	}
+
+	enabled := true
+	if request.Enabled != nil {
+		enabled = *request.Enabled
+	}
+
+	return domain.AttendanceShift{
+		ID:              id,
+		Name:            strings.TrimSpace(request.Name),
+		Start:           start,
+		End:             end,
+		LateGrace:       time.Duration(request.LateGraceMinutes) * time.Minute,
+		EarlyLeaveGrace: time.Duration(request.EarlyLeaveGraceMinutes) * time.Minute,
+		Flexible:        time.Duration(request.FlexibleMinutes) * time.Minute,
+		Enabled:         enabled,
+	}, nil
+}
+
+func attendanceCalendarDayFromRequest(request attendancev1.SaveAttendanceCalendarDayRequest, pathDate string) (domain.AttendanceCalendarDay, error) {
+	dateValue := strings.TrimSpace(request.Date)
+	pathDate = strings.TrimSpace(pathDate)
+	if pathDate != "" {
+		if dateValue != "" && dateValue != pathDate {
+			return domain.AttendanceCalendarDay{}, errors.New("path date must match request date")
+		}
+		dateValue = pathDate
+	}
+	if dateValue == "" {
+		return domain.AttendanceCalendarDay{}, errors.New("date cannot be empty")
+	}
+
+	date, err := parseDateValue("date", dateValue)
+	if err != nil {
+		return domain.AttendanceCalendarDay{}, err
+	}
+
+	dayType := domain.CalendarDayType(strings.TrimSpace(request.DayType))
+	if !validCalendarDayType(dayType) {
+		return domain.AttendanceCalendarDay{}, fmt.Errorf("unsupported day_type %q", dayType)
+	}
+
+	return domain.AttendanceCalendarDay{
+		Date:    date,
+		DayType: dayType,
+		Name:    strings.TrimSpace(request.Name),
+	}, nil
+}
+
+func attendanceScheduleFromRequest(request attendancev1.SaveAttendanceScheduleRequest, pathID string) (domain.ManagedAttendanceSchedule, error) {
+	id, err := mergeRequestID(request.ID, pathID)
+	if err != nil {
+		return domain.ManagedAttendanceSchedule{}, err
+	}
+	if strings.TrimSpace(request.Date) == "" {
+		return domain.ManagedAttendanceSchedule{}, errors.New("date cannot be empty")
+	}
+	date, err := parseDateValue("date", request.Date)
+	if err != nil {
+		return domain.ManagedAttendanceSchedule{}, err
+	}
+
+	enabled := true
+	if request.Enabled != nil {
+		enabled = *request.Enabled
+	}
+
+	return domain.ManagedAttendanceSchedule{
+		ID:       id,
+		UserID:   strings.TrimSpace(request.UserID),
+		DeviceSN: strings.TrimSpace(request.DeviceSN),
+		Date:     date,
+		ShiftID:  strings.TrimSpace(request.ShiftID),
+		Rest:     request.Rest,
+		Reason:   strings.TrimSpace(request.Reason),
+		Enabled:  enabled,
+	}, nil
+}
+
+func attendanceWeeklyScheduleFromRequest(request attendancev1.SaveAttendanceWeeklyScheduleRequest, pathID string) (domain.ManagedAttendanceWeeklySchedule, error) {
+	id, err := mergeRequestID(request.ID, pathID)
+	if err != nil {
+		return domain.ManagedAttendanceWeeklySchedule{}, err
+	}
+
+	weekday, err := parseWeekdayValue("weekday", request.Weekday)
+	if err != nil {
+		return domain.ManagedAttendanceWeeklySchedule{}, err
+	}
+
+	enabled := true
+	if request.Enabled != nil {
+		enabled = *request.Enabled
+	}
+
+	return domain.ManagedAttendanceWeeklySchedule{
+		ID:       id,
+		UserID:   strings.TrimSpace(request.UserID),
+		DeviceSN: strings.TrimSpace(request.DeviceSN),
+		Weekday:  weekday,
+		ShiftID:  strings.TrimSpace(request.ShiftID),
+		Rest:     request.Rest,
+		Reason:   strings.TrimSpace(request.Reason),
+		Enabled:  enabled,
+	}, nil
+}
+
+func mergeRequestID(requestID int64, pathID string) (int64, error) {
+	pathID = strings.TrimSpace(pathID)
+	if pathID == "" {
+		return requestID, nil
+	}
+
+	id, err := strconv.ParseInt(pathID, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, errors.New("id must be a positive integer")
+	}
+	if requestID > 0 && requestID != id {
+		return 0, errors.New("path id must match request id")
+	}
+
+	return id, nil
+}
+
+func parseClockTimeValue(key string, value string) (domain.ClockTime, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return domain.ClockTime{}, fmt.Errorf("%s cannot be empty", key)
+	}
+
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 {
+		return domain.ClockTime{}, fmt.Errorf("%s must use HH:MM format", key)
+	}
+
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil || hour < 0 || hour > 23 {
+		return domain.ClockTime{}, fmt.Errorf("%s hour must be between 0 and 23", key)
+	}
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil || minute < 0 || minute > 59 {
+		return domain.ClockTime{}, fmt.Errorf("%s minute must be between 0 and 59", key)
+	}
+
+	return domain.ClockTime{Hour: hour, Minute: minute}, nil
+}
+
+func parseWeekdayValue(key string, value string) (time.Weekday, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "0", "sunday", "sun":
+		return time.Sunday, nil
+	case "1", "monday", "mon":
+		return time.Monday, nil
+	case "2", "tuesday", "tue":
+		return time.Tuesday, nil
+	case "3", "wednesday", "wed":
+		return time.Wednesday, nil
+	case "4", "thursday", "thu":
+		return time.Thursday, nil
+	case "5", "friday", "fri":
+		return time.Friday, nil
+	case "6", "saturday", "sat":
+		return time.Saturday, nil
+	default:
+		return 0, fmt.Errorf("%s must be one of sunday,monday,tuesday,wednesday,thursday,friday,saturday", key)
+	}
+}
+
+func validCalendarDayType(dayType domain.CalendarDayType) bool {
+	switch dayType {
+	case domain.CalendarDayTypeHoliday, domain.CalendarDayTypeWorkday, domain.CalendarDayTypeRestDay:
+		return true
+	default:
+		return false
+	}
+}
+
+func toAttendanceSettingsDTO(settings domain.AttendanceSettings) attendancev1.AttendanceSettingsDTO {
+	return attendancev1.AttendanceSettingsDTO{
+		Timezone:       settings.Timezone,
+		DefaultShiftID: settings.DefaultShiftID,
+		WeekendDays:    weekdaysToStrings(settings.WeekendDays),
+	}
+}
+
+func toAttendanceShiftDTOs(shifts []domain.AttendanceShift) []attendancev1.AttendanceShiftDTO {
+	dtos := make([]attendancev1.AttendanceShiftDTO, 0, len(shifts))
+	for _, shift := range shifts {
+		dtos = append(dtos, toAttendanceShiftDTO(shift))
+	}
+
+	return dtos
+}
+
+func toAttendanceShiftDTO(shift domain.AttendanceShift) attendancev1.AttendanceShiftDTO {
+	return attendancev1.AttendanceShiftDTO{
+		ID:                     shift.ID,
+		Name:                   shift.Name,
+		StartTime:              clockTimeToString(shift.Start),
+		EndTime:                clockTimeToString(shift.End),
+		LateGraceMinutes:       int(shift.LateGrace.Minutes()),
+		EarlyLeaveGraceMinutes: int(shift.EarlyLeaveGrace.Minutes()),
+		FlexibleMinutes:        int(shift.Flexible.Minutes()),
+		Enabled:                shift.Enabled,
+	}
+}
+
+func toAttendanceCalendarDayDTOs(days []domain.AttendanceCalendarDay) []attendancev1.AttendanceCalendarDayDTO {
+	dtos := make([]attendancev1.AttendanceCalendarDayDTO, 0, len(days))
+	for _, day := range days {
+		dtos = append(dtos, toAttendanceCalendarDayDTO(day))
+	}
+
+	return dtos
+}
+
+func toAttendanceCalendarDayDTO(day domain.AttendanceCalendarDay) attendancev1.AttendanceCalendarDayDTO {
+	return attendancev1.AttendanceCalendarDayDTO{
+		Date:    day.Date.Format(queryDateLayout),
+		DayType: day.DayType.String(),
+		Name:    day.Name,
+	}
+}
+
+func toAttendanceScheduleDTOs(schedules []domain.ManagedAttendanceSchedule) []attendancev1.AttendanceScheduleDTO {
+	dtos := make([]attendancev1.AttendanceScheduleDTO, 0, len(schedules))
+	for _, schedule := range schedules {
+		dtos = append(dtos, toAttendanceScheduleDTO(schedule))
+	}
+
+	return dtos
+}
+
+func toAttendanceScheduleDTO(schedule domain.ManagedAttendanceSchedule) attendancev1.AttendanceScheduleDTO {
+	return attendancev1.AttendanceScheduleDTO{
+		ID:       schedule.ID,
+		UserID:   schedule.UserID,
+		DeviceSN: schedule.DeviceSN,
+		Date:     schedule.Date.Format(queryDateLayout),
+		ShiftID:  schedule.ShiftID,
+		Rest:     schedule.Rest,
+		Reason:   schedule.Reason,
+		Enabled:  schedule.Enabled,
+	}
+}
+
+func toAttendanceWeeklyScheduleDTOs(schedules []domain.ManagedAttendanceWeeklySchedule) []attendancev1.AttendanceWeeklyScheduleDTO {
+	dtos := make([]attendancev1.AttendanceWeeklyScheduleDTO, 0, len(schedules))
+	for _, schedule := range schedules {
+		dtos = append(dtos, toAttendanceWeeklyScheduleDTO(schedule))
+	}
+
+	return dtos
+}
+
+func toAttendanceWeeklyScheduleDTO(schedule domain.ManagedAttendanceWeeklySchedule) attendancev1.AttendanceWeeklyScheduleDTO {
+	return attendancev1.AttendanceWeeklyScheduleDTO{
+		ID:       schedule.ID,
+		UserID:   schedule.UserID,
+		DeviceSN: schedule.DeviceSN,
+		Weekday:  weekdayToString(schedule.Weekday),
+		ShiftID:  schedule.ShiftID,
+		Rest:     schedule.Rest,
+		Reason:   schedule.Reason,
+		Enabled:  schedule.Enabled,
+	}
+}
+
+func weekdaysToStrings(weekdays []time.Weekday) []string {
+	values := make([]string, 0, len(weekdays))
+	for _, weekday := range weekdays {
+		values = append(values, weekdayToString(weekday))
+	}
+
+	return values
+}
+
+func weekdayToString(weekday time.Weekday) string {
+	switch weekday {
+	case time.Sunday:
+		return "sunday"
+	case time.Monday:
+		return "monday"
+	case time.Tuesday:
+		return "tuesday"
+	case time.Wednesday:
+		return "wednesday"
+	case time.Thursday:
+		return "thursday"
+	case time.Friday:
+		return "friday"
+	case time.Saturday:
+		return "saturday"
+	default:
+		return ""
+	}
+}
+
+func clockTimeToString(value domain.ClockTime) string {
+	return fmt.Sprintf("%02d:%02d", value.Hour, value.Minute)
 }
 
 func toAttendanceRecordDTOs(records []domain.AttendanceRecord) []attendancev1.AttendanceRecordDTO {
