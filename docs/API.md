@@ -176,6 +176,10 @@ curl "http://127.0.0.1:8080/api/v1/attendance/daily?user_id=REDACTED_USER_ID&dat
       "status": "late",
       "exceptions": ["late"],
       "is_abnormal": true,
+      "corrected": false,
+      "correction_status": "",
+      "correction_reason": "",
+      "corrected_at": 0,
       "work_start_at": 1786323600,
       "work_end_at": 1786356000,
       "first_entry_at": 1786324500,
@@ -204,6 +208,10 @@ curl "http://127.0.0.1:8080/api/v1/attendance/daily?user_id=REDACTED_USER_ID&dat
 | `status` | string | 日报状态。 |
 | `exceptions` | string[] | 异常类型列表。 |
 | `is_abnormal` | bool | 是否异常；休息日不算异常。 |
+| `corrected` | bool | 是否已通过补卡修正。 |
+| `correction_status` | string | 补卡状态，例如 `applied`；未补卡时为空。 |
+| `correction_reason` | string | 补卡原因。 |
+| `corrected_at` | int | 补卡时间，Unix 秒；未补卡时为 `0`。 |
 | `work_start_at` | int | 应上班时间，Unix 秒。 |
 | `work_end_at` | int | 应下班时间，Unix 秒。 |
 | `first_entry_at` | int | 当日首次入场时间，Unix 秒；无记录时为 `0`。 |
@@ -218,6 +226,7 @@ curl "http://127.0.0.1:8080/api/v1/attendance/daily?user_id=REDACTED_USER_ID&dat
 | 状态 | 说明 |
 | --- | --- |
 | `normal` | 正常。 |
+| `corrected` | 已补卡修正，按非异常处理。 |
 | `late` | 迟到。 |
 | `early_leave` | 早退。 |
 | `late_and_early_leave` | 迟到且早退。 |
@@ -268,6 +277,33 @@ curl "http://127.0.0.1:8080/api/v1/attendance/monthly?month=2026-08"
       "user_id": "REDACTED_USER_ID",
       "user_name": "REDACTED_NAME",
       "device_sn": "REDACTED_DEVICE_SN",
+      "days": [
+        {
+          "date": "2026-08-10",
+          "user_id": "REDACTED_USER_ID",
+          "user_name": "REDACTED_NAME",
+          "device_sn": "REDACTED_DEVICE_SN",
+          "shift_id": "day",
+          "shift_name": "Day Shift",
+          "is_workday": true,
+          "non_workday_reason": "",
+          "status": "corrected",
+          "exceptions": [],
+          "is_abnormal": false,
+          "corrected": true,
+          "correction_status": "applied",
+          "correction_reason": "manual correction",
+          "corrected_at": 1786356000,
+          "work_start_at": 1786323600,
+          "work_end_at": 1786356000,
+          "first_entry_at": 1786323600,
+          "last_exit_at": 1786356000,
+          "late_seconds": 0,
+          "early_leave_seconds": 0,
+          "record_count": 1,
+          "snapshot_count": 0
+        }
+      ],
       "stats": {
         "total_days": 31,
         "work_days": 21,
@@ -289,6 +325,8 @@ curl "http://127.0.0.1:8080/api/v1/attendance/monthly?month=2026-08"
   ]
 }
 ```
+
+说明：`days` 为该用户当月按天的考勤明细，字段和日报接口一致，用于前端按天展示当天是否异常、是否已补卡。月报统计会基于这些按天结果聚合。
 
 ## 查询考勤汇总
 
@@ -402,6 +440,10 @@ curl "http://127.0.0.1:8080/api/v1/attendance/exceptions?start_date=2026-08-01&e
       "status": "missing_check_out",
       "exceptions": ["missing_check_out"],
       "is_abnormal": true,
+      "corrected": false,
+      "correction_status": "",
+      "correction_reason": "",
+      "corrected_at": 0,
       "work_start_at": 1786323600,
       "work_end_at": 1786356000,
       "first_entry_at": 1786323300,
@@ -410,6 +452,75 @@ curl "http://127.0.0.1:8080/api/v1/attendance/exceptions?start_date=2026-08-01&e
       "early_leave_seconds": 0,
       "record_count": 1,
       "snapshot_count": 1
+    }
+  ]
+}
+```
+
+## 补卡
+
+### `POST /api/v1/attendance/corrections`
+
+接收补卡请求。服务会保留原始设备打卡记录不变，新增补卡记录，并把对应用户、对应日期的月报按天结果写入 `monthly_attendance_results`，标记为已补卡且非异常。后续日报、月报、异常列表查询会读取该修正状态。
+
+请求参数：
+
+| 字段 | 必填 | 格式 | 说明 |
+| --- | --- | --- | --- |
+| `user_id` | 是 | string | 用户 ID。 |
+| `device_sn` | 否 | string | 设备 SN；为空时表示不限定设备。 |
+| `date` | 是 | `YYYY-MM-DD` | 需要补卡的考勤业务日期。 |
+| `type` | 是 | string | 补卡类型，支持 `check_in`、`check_out`。 |
+| `corrected_at` | 是 | Unix 秒 | 补卡时间。 |
+| `reason` | 否 | string | 补卡原因。 |
+
+请求示例：
+
+```bash
+curl -X POST "http://127.0.0.1:8080/api/v1/attendance/corrections" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "REDACTED_USER_ID",
+    "device_sn": "REDACTED_DEVICE_SN",
+    "date": "2026-08-10",
+    "type": "check_out",
+    "corrected_at": 1786356000,
+    "reason": "manual correction"
+  }'
+```
+
+响应：
+
+```json
+{
+  "correction": {
+    "id": 1,
+    "user_id": "REDACTED_USER_ID",
+    "device_sn": "REDACTED_DEVICE_SN",
+    "date": "2026-08-10",
+    "type": "check_out",
+    "corrected_at": 1786356000,
+    "reason": "manual correction",
+    "status": "applied"
+  }
+}
+```
+
+补卡后的日报示例：
+
+```json
+{
+  "records": [
+    {
+      "date": "2026-08-10",
+      "user_id": "REDACTED_USER_ID",
+      "status": "corrected",
+      "exceptions": [],
+      "is_abnormal": false,
+      "corrected": true,
+      "correction_status": "applied",
+      "correction_reason": "manual correction",
+      "corrected_at": 1786356000
     }
   ]
 }
@@ -666,6 +777,8 @@ curl "http://127.0.0.1:8080/api/v1/attendance/exceptions?start_date=2026-08-01&e
 - 日报、汇总、异常列表日期范围不能超过 `31` 天。
 - `month` 必须使用 `YYYY-MM`。
 - `limit`、`offset` 必须为整数。
+- `corrected_at` 必须为正整数 Unix 秒。
+- 补卡 `type` 只支持 `check_in`、`check_out`。
 - `start_time`、`end_time` 班次时间必须使用 `HH:MM`。
 - `day_type` 只支持 `holiday`、`workday`、`rest_day`。
 - `weekday` 支持英文全称、三字母缩写或 `0` 到 `6`。
