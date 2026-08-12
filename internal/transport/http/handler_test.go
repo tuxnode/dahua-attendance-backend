@@ -26,6 +26,7 @@ type fakeService struct {
 	dailyRecords              []domain.DailyAttendance
 	monthlyRecords            []domain.MonthlyAttendance
 	summary                   domain.AttendanceSummary
+	correction                domain.AttendanceCorrection
 	settings                  domain.AttendanceSettings
 	shifts                    []domain.AttendanceShift
 	calendarDays              []domain.AttendanceCalendarDay
@@ -49,12 +50,14 @@ type fakeService struct {
 	deletedScheduleID         int64
 	savedWeeklySchedule       domain.ManagedAttendanceWeeklySchedule
 	deletedWeeklyScheduleID   int64
+	savedCorrection           domain.AttendanceCorrection
 	handleErr                 error
 	listErr                   error
 	listDailyErr              error
 	listMonthlyErr            error
 	summaryErr                error
 	listExceptionErr          error
+	saveCorrectionErr         error
 	settingsErr               error
 	saveSettingsErr           error
 	listShiftsErr             error
@@ -75,6 +78,7 @@ type fakeService struct {
 	listMonthlyCalls          int
 	summaryCalls              int
 	listExceptionCalls        int
+	saveCorrectionCalls       int
 	getSettingsCalls          int
 	saveSettingsCalls         int
 	listShiftsCalls           int
@@ -140,6 +144,18 @@ func (s *fakeService) ListAttendanceExceptions(_ context.Context, query domain.A
 		return nil, s.listExceptionErr
 	}
 	return append([]domain.DailyAttendance(nil), s.dailyRecords...), nil
+}
+
+func (s *fakeService) SaveAttendanceCorrection(_ context.Context, correction domain.AttendanceCorrection) (domain.AttendanceCorrection, error) {
+	s.saveCorrectionCalls++
+	s.savedCorrection = correction
+	if s.saveCorrectionErr != nil {
+		return domain.AttendanceCorrection{}, s.saveCorrectionErr
+	}
+	if correction.ID == 0 {
+		correction.ID = 1
+	}
+	return correction, nil
 }
 
 func (s *fakeService) GetAttendanceSettings(_ context.Context) (domain.AttendanceSettings, error) {
@@ -778,6 +794,70 @@ func TestHandleAttendanceExceptionsReturnsRecords(t *testing.T) {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("response missing %s: %s", expected, body)
 		}
+	}
+}
+
+func TestHandleCreateAttendanceCorrection(t *testing.T) {
+	service := &fakeService{}
+	router := newTestRouter(service)
+
+	body := `{
+		"user_id": "REDACTED_USER_ID",
+		"device_sn": "REDACTED_DEVICE_SN",
+		"date": "2026-08-10",
+		"type": "check_out",
+		"corrected_at": 1786356000,
+		"reason": "manual correction"
+	}`
+	request := httptest.NewRequest(http.MethodPost, transporthttp.AttendanceCorrectionsPath, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+	}
+	if service.saveCorrectionCalls != 1 {
+		t.Fatalf("unexpected save correction calls: %d", service.saveCorrectionCalls)
+	}
+	if service.savedCorrection.UserID != "REDACTED_USER_ID" {
+		t.Fatalf("unexpected user id: %s", service.savedCorrection.UserID)
+	}
+	if service.savedCorrection.DeviceSN != "REDACTED_DEVICE_SN" {
+		t.Fatalf("unexpected device sn: %s", service.savedCorrection.DeviceSN)
+	}
+	if service.savedCorrection.Date.Format("2006-01-02") != "2026-08-10" {
+		t.Fatalf("unexpected date: %s", service.savedCorrection.Date)
+	}
+	if service.savedCorrection.Type != domain.AttendanceCorrectionTypeCheckOut {
+		t.Fatalf("unexpected type: %s", service.savedCorrection.Type)
+	}
+	if service.savedCorrection.CorrectedAt.Unix() != 1786356000 {
+		t.Fatalf("unexpected corrected at: %s", service.savedCorrection.CorrectedAt)
+	}
+	if !strings.Contains(response.Body.String(), `"status":"applied"`) {
+		t.Fatalf("unexpected response body: %s", response.Body.String())
+	}
+}
+
+func TestHandleCreateAttendanceCorrectionRejectsInvalidType(t *testing.T) {
+	router := newTestRouter(&fakeService{})
+
+	body := `{
+		"user_id": "REDACTED_USER_ID",
+		"date": "2026-08-10",
+		"type": "unknown",
+		"corrected_at": 1786356000
+	}`
+	request := httptest.NewRequest(http.MethodPost, transporthttp.AttendanceCorrectionsPath, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d", response.Code)
 	}
 }
 

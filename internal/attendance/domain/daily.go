@@ -6,6 +6,7 @@ type DailyAttendanceStatus string
 
 const (
 	DailyAttendanceStatusNormal            DailyAttendanceStatus = "normal"
+	DailyAttendanceStatusCorrected         DailyAttendanceStatus = "corrected"
 	DailyAttendanceStatusLate              DailyAttendanceStatus = "late"
 	DailyAttendanceStatusEarlyLeave        DailyAttendanceStatus = "early_leave"
 	DailyAttendanceStatusLateAndEarlyLeave DailyAttendanceStatus = "late_and_early_leave"
@@ -67,6 +68,79 @@ type AttendanceExceptionQuery struct {
 	Offset    int
 }
 
+type AttendanceCorrectionType string
+
+const (
+	AttendanceCorrectionTypeCheckIn  AttendanceCorrectionType = "check_in"
+	AttendanceCorrectionTypeCheckOut AttendanceCorrectionType = "check_out"
+)
+
+func (t AttendanceCorrectionType) String() string {
+	return string(t)
+}
+
+type AttendanceCorrectionStatus string
+
+const (
+	AttendanceCorrectionStatusApplied AttendanceCorrectionStatus = "applied"
+)
+
+func (s AttendanceCorrectionStatus) String() string {
+	return string(s)
+}
+
+type AttendanceCorrection struct {
+	ID          int64
+	UserID      string
+	DeviceSN    string
+	Date        time.Time
+	Type        AttendanceCorrectionType
+	CorrectedAt time.Time
+	Reason      string
+	Status      AttendanceCorrectionStatus
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type MonthlyAttendanceResultQuery struct {
+	UserID    string
+	DeviceSN  string
+	StartDate time.Time
+	EndDate   time.Time
+	Month     time.Time
+	Limit     int
+	Offset    int
+}
+
+type MonthlyAttendanceDailyResult struct {
+	ID                 int64
+	Month              time.Time
+	Date               time.Time
+	UserID             string
+	UserName           string
+	DeviceSN           string
+	ShiftID            string
+	ShiftName          string
+	IsWorkday          bool
+	NonWorkdayReason   string
+	Status             DailyAttendanceStatus
+	Exceptions         []DailyAttendanceException
+	IsAbnormal         bool
+	Corrected          bool
+	CorrectionStatus   AttendanceCorrectionStatus
+	CorrectionReason   string
+	CorrectedAt        time.Time
+	WorkStartAt        time.Time
+	WorkEndAt          time.Time
+	FirstEntryAt       time.Time
+	LastExitAt         time.Time
+	LateDuration       time.Duration
+	EarlyLeaveDuration time.Duration
+	RecordCount        int
+	SnapshotCount      int
+	CalculatedAt       time.Time
+}
+
 type DailyAttendance struct {
 	Date               time.Time
 	UserID             string
@@ -78,6 +152,11 @@ type DailyAttendance struct {
 	NonWorkdayReason   string
 	Status             DailyAttendanceStatus
 	Exceptions         []DailyAttendanceException
+	IsAbnormalOverride *bool
+	Corrected          bool
+	CorrectionStatus   AttendanceCorrectionStatus
+	CorrectionReason   string
+	CorrectedAt        time.Time
 	WorkStartAt        time.Time
 	WorkEndAt          time.Time
 	FirstEntryAt       time.Time
@@ -93,6 +172,7 @@ type MonthlyAttendance struct {
 	UserID   string
 	UserName string
 	DeviceSN string
+	Days     []DailyAttendance
 	Stats    AttendanceStats
 }
 
@@ -122,8 +202,13 @@ type AttendanceStats struct {
 }
 
 func (a DailyAttendance) IsAbnormal() bool {
+	if a.IsAbnormalOverride != nil {
+		return *a.IsAbnormalOverride
+	}
+
 	return a.Status != "" &&
 		a.Status != DailyAttendanceStatusNormal &&
+		a.Status != DailyAttendanceStatusCorrected &&
 		a.Status != DailyAttendanceStatusRestDay
 }
 

@@ -613,6 +613,275 @@ func (r *SQLRepository) DeleteAttendanceWeeklySchedule(ctx context.Context, id i
 	return nil
 }
 
+func (r *SQLRepository) SaveAttendanceCorrection(ctx context.Context, correction domain.AttendanceCorrection) (domain.AttendanceCorrection, error) {
+	const query = `
+INSERT INTO attendance_corrections (
+	user_id,
+	device_sn,
+	attendance_date,
+	correction_type,
+	corrected_at,
+	reason,
+	status
+) VALUES (?, ?, ?, ?, ?, ?, ?)`
+
+	result, err := r.executor.ExecContext(
+		ctx,
+		query,
+		correction.UserID,
+		correction.DeviceSN,
+		correction.Date,
+		correction.Type.String(),
+		correction.CorrectedAt,
+		correction.Reason,
+		correction.Status.String(),
+	)
+	if err != nil {
+		return domain.AttendanceCorrection{}, fmt.Errorf("repository: save attendance correction: %w", err)
+	}
+	if id, err := result.LastInsertId(); err == nil && id > 0 {
+		correction.ID = id
+	}
+
+	return correction, nil
+}
+
+func (r *SQLRepository) SaveMonthlyAttendanceResult(ctx context.Context, result domain.MonthlyAttendanceDailyResult) (domain.MonthlyAttendanceDailyResult, error) {
+	const query = `
+INSERT INTO monthly_attendance_results (
+	attendance_month,
+	attendance_date,
+	user_id,
+	user_name,
+	device_sn,
+	shift_id,
+	shift_name,
+	is_workday,
+	non_workday_reason,
+	status,
+	exceptions,
+	is_abnormal,
+	corrected,
+	correction_status,
+	correction_reason,
+	corrected_at,
+	work_start_at,
+	work_end_at,
+	first_entry_at,
+	last_exit_at,
+	late_seconds,
+	early_leave_seconds,
+	record_count,
+	snapshot_count,
+	calculated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+	attendance_month = VALUES(attendance_month),
+	user_name = VALUES(user_name),
+	shift_id = VALUES(shift_id),
+	shift_name = VALUES(shift_name),
+	is_workday = VALUES(is_workday),
+	non_workday_reason = VALUES(non_workday_reason),
+	status = VALUES(status),
+	exceptions = VALUES(exceptions),
+	is_abnormal = VALUES(is_abnormal),
+	corrected = VALUES(corrected),
+	correction_status = VALUES(correction_status),
+	correction_reason = VALUES(correction_reason),
+	corrected_at = VALUES(corrected_at),
+	work_start_at = VALUES(work_start_at),
+	work_end_at = VALUES(work_end_at),
+	first_entry_at = VALUES(first_entry_at),
+	last_exit_at = VALUES(last_exit_at),
+	late_seconds = VALUES(late_seconds),
+	early_leave_seconds = VALUES(early_leave_seconds),
+	record_count = VALUES(record_count),
+	snapshot_count = VALUES(snapshot_count),
+	calculated_at = VALUES(calculated_at),
+	id = LAST_INSERT_ID(id)`
+
+	dbResult, err := r.executor.ExecContext(
+		ctx,
+		query,
+		result.Month,
+		result.Date,
+		result.UserID,
+		result.UserName,
+		result.DeviceSN,
+		result.ShiftID,
+		result.ShiftName,
+		result.IsWorkday,
+		result.NonWorkdayReason,
+		result.Status.String(),
+		formatAttendanceExceptions(result.Exceptions),
+		result.IsAbnormal,
+		result.Corrected,
+		result.CorrectionStatus.String(),
+		result.CorrectionReason,
+		nullableTime(result.CorrectedAt),
+		nullableTime(result.WorkStartAt),
+		nullableTime(result.WorkEndAt),
+		nullableTime(result.FirstEntryAt),
+		nullableTime(result.LastExitAt),
+		int64(result.LateDuration.Seconds()),
+		int64(result.EarlyLeaveDuration.Seconds()),
+		result.RecordCount,
+		result.SnapshotCount,
+		result.CalculatedAt,
+	)
+	if err != nil {
+		return domain.MonthlyAttendanceDailyResult{}, fmt.Errorf("repository: save monthly attendance result: %w", err)
+	}
+	if id, err := dbResult.LastInsertId(); err == nil && id > 0 {
+		result.ID = id
+	}
+
+	return result, nil
+}
+
+func (r *SQLRepository) ListMonthlyAttendanceResults(ctx context.Context, query domain.MonthlyAttendanceResultQuery) ([]domain.MonthlyAttendanceDailyResult, error) {
+	sqlQuery, args := buildListMonthlyAttendanceResultsQuery(query)
+	rows, err := r.executor.QueryContext(ctx, sqlQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("repository: list monthly attendance results: %w", err)
+	}
+	defer rows.Close()
+
+	results := make([]domain.MonthlyAttendanceDailyResult, 0)
+	for rows.Next() {
+		result, err := scanMonthlyAttendanceResult(rows)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repository: iterate monthly attendance results: %w", err)
+	}
+
+	return results, nil
+}
+
+func buildListMonthlyAttendanceResultsQuery(filter domain.MonthlyAttendanceResultQuery) (string, []any) {
+	var builder strings.Builder
+	args := make([]any, 0, 8)
+
+	builder.WriteString(`
+SELECT
+	id,
+	attendance_month,
+	attendance_date,
+	user_id,
+	user_name,
+	device_sn,
+	shift_id,
+	shift_name,
+	is_workday,
+	non_workday_reason,
+	status,
+	exceptions,
+	is_abnormal,
+	corrected,
+	correction_status,
+	correction_reason,
+	corrected_at,
+	work_start_at,
+	work_end_at,
+	first_entry_at,
+	last_exit_at,
+	late_seconds,
+	early_leave_seconds,
+	record_count,
+	snapshot_count,
+	calculated_at
+FROM monthly_attendance_results
+WHERE 1 = 1`)
+	if filter.UserID != "" {
+		builder.WriteString("\n  AND user_id = ?")
+		args = append(args, filter.UserID)
+	}
+	if filter.DeviceSN != "" {
+		builder.WriteString("\n  AND device_sn = ?")
+		args = append(args, filter.DeviceSN)
+	}
+	if !filter.StartDate.IsZero() {
+		builder.WriteString("\n  AND attendance_date >= ?")
+		args = append(args, filter.StartDate)
+	}
+	if !filter.EndDate.IsZero() {
+		builder.WriteString("\n  AND attendance_date <= ?")
+		args = append(args, filter.EndDate)
+	}
+	if !filter.Month.IsZero() {
+		builder.WriteString("\n  AND attendance_month = ?")
+		args = append(args, filter.Month)
+	}
+	builder.WriteString("\nORDER BY attendance_date DESC, user_id ASC, device_sn ASC")
+	if filter.Limit > 0 {
+		builder.WriteString("\nLIMIT ? OFFSET ?")
+		args = append(args, filter.Limit, filter.Offset)
+	}
+
+	return builder.String(), args
+}
+
+func scanMonthlyAttendanceResult(scanner attendanceRecordScanner) (domain.MonthlyAttendanceDailyResult, error) {
+	var result domain.MonthlyAttendanceDailyResult
+	var status string
+	var exceptions string
+	var correctionStatus string
+	var correctedAt sql.NullTime
+	var workStartAt sql.NullTime
+	var workEndAt sql.NullTime
+	var firstEntryAt sql.NullTime
+	var lastExitAt sql.NullTime
+	var lateSeconds int64
+	var earlyLeaveSeconds int64
+	if err := scanner.Scan(
+		&result.ID,
+		&result.Month,
+		&result.Date,
+		&result.UserID,
+		&result.UserName,
+		&result.DeviceSN,
+		&result.ShiftID,
+		&result.ShiftName,
+		&result.IsWorkday,
+		&result.NonWorkdayReason,
+		&status,
+		&exceptions,
+		&result.IsAbnormal,
+		&result.Corrected,
+		&correctionStatus,
+		&result.CorrectionReason,
+		&correctedAt,
+		&workStartAt,
+		&workEndAt,
+		&firstEntryAt,
+		&lastExitAt,
+		&lateSeconds,
+		&earlyLeaveSeconds,
+		&result.RecordCount,
+		&result.SnapshotCount,
+		&result.CalculatedAt,
+	); err != nil {
+		return domain.MonthlyAttendanceDailyResult{}, fmt.Errorf("repository: scan monthly attendance result: %w", err)
+	}
+
+	result.Status = domain.DailyAttendanceStatus(status)
+	result.Exceptions = parseAttendanceExceptions(exceptions)
+	result.CorrectionStatus = domain.AttendanceCorrectionStatus(correctionStatus)
+	result.CorrectedAt = nullTimeValue(correctedAt)
+	result.WorkStartAt = nullTimeValue(workStartAt)
+	result.WorkEndAt = nullTimeValue(workEndAt)
+	result.FirstEntryAt = nullTimeValue(firstEntryAt)
+	result.LastExitAt = nullTimeValue(lastExitAt)
+	result.LateDuration = time.Duration(lateSeconds) * time.Second
+	result.EarlyLeaveDuration = time.Duration(earlyLeaveSeconds) * time.Second
+
+	return result, nil
+}
+
 type SQLRepository struct {
 	executor SQLExecutor
 }
@@ -956,4 +1225,45 @@ func parseTwoDigitNumber(value string, min int, max int) (int, bool) {
 
 func formatClockTime(value domain.ClockTime) string {
 	return fmt.Sprintf("%02d:%02d", value.Hour, value.Minute)
+}
+
+func nullableTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+
+	return value
+}
+
+func nullTimeValue(value sql.NullTime) time.Time {
+	if !value.Valid {
+		return time.Time{}
+	}
+
+	return value.Time
+}
+
+func formatAttendanceExceptions(exceptions []domain.DailyAttendanceException) string {
+	values := make([]string, 0, len(exceptions))
+	for _, exception := range exceptions {
+		exceptionValue := strings.TrimSpace(exception.String())
+		if exceptionValue != "" {
+			values = append(values, exceptionValue)
+		}
+	}
+
+	return strings.Join(values, ",")
+}
+
+func parseAttendanceExceptions(value string) []domain.DailyAttendanceException {
+	items := strings.Split(value, ",")
+	exceptions := make([]domain.DailyAttendanceException, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			exceptions = append(exceptions, domain.DailyAttendanceException(item))
+		}
+	}
+
+	return exceptions
 }

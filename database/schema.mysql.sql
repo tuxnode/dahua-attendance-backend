@@ -137,3 +137,56 @@ CREATE TABLE IF NOT EXISTS attendance_weekly_schedules (
     KEY idx_attendance_weekly_schedule_device_weekday (device_sn, weekday),
     KEY idx_attendance_weekly_schedule_enabled (enabled)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS attendance_corrections (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL,
+    device_sn VARCHAR(64) NOT NULL DEFAULT '',
+    attendance_date DATE NOT NULL,
+    correction_type VARCHAR(16) NOT NULL,
+    corrected_at DATETIME NOT NULL,
+    reason VARCHAR(255) NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL DEFAULT 'applied',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_attendance_correction_user_date (user_id, attendance_date),
+    KEY idx_attendance_correction_device_date (device_sn, attendance_date),
+    KEY idx_attendance_correction_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS monthly_attendance_results (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    attendance_month DATE NOT NULL,
+    attendance_date DATE NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    user_name VARCHAR(128) NOT NULL DEFAULT '',
+    device_sn VARCHAR(64) NOT NULL DEFAULT '',
+    shift_id VARCHAR(64) NOT NULL DEFAULT '',
+    shift_name VARCHAR(128) NOT NULL DEFAULT '',
+    is_workday BOOLEAN NOT NULL DEFAULT TRUE,
+    non_workday_reason VARCHAR(128) NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL DEFAULT '',
+    exceptions VARCHAR(255) NOT NULL DEFAULT '',
+    is_abnormal BOOLEAN NOT NULL DEFAULT FALSE,
+    corrected BOOLEAN NOT NULL DEFAULT FALSE,
+    correction_status VARCHAR(32) NOT NULL DEFAULT '',
+    correction_reason VARCHAR(255) NOT NULL DEFAULT '',
+    corrected_at DATETIME NULL,
+    work_start_at DATETIME NULL,
+    work_end_at DATETIME NULL,
+    first_entry_at DATETIME NULL,
+    last_exit_at DATETIME NULL,
+    late_seconds BIGINT NOT NULL DEFAULT 0,
+    early_leave_seconds BIGINT NOT NULL DEFAULT 0,
+    record_count INT NOT NULL DEFAULT 0,
+    snapshot_count INT NOT NULL DEFAULT 0,
+    calculated_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_monthly_attendance_result_day (user_id, device_sn, attendance_date),
+    KEY idx_monthly_attendance_result_month (attendance_month),
+    KEY idx_monthly_attendance_result_user_month (user_id, attendance_month),
+    KEY idx_monthly_attendance_result_device_month (device_sn, attendance_month),
+    KEY idx_monthly_attendance_result_abnormal (is_abnormal),
+    KEY idx_monthly_attendance_result_corrected (corrected)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

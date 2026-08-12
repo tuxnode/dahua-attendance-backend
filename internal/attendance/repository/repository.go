@@ -25,4 +25,7 @@ type Repository interface {
 	ListAttendanceWeeklySchedules(ctx context.Context, query domain.AttendanceWeeklyScheduleQuery) ([]domain.ManagedAttendanceWeeklySchedule, error)
 	SaveAttendanceWeeklySchedule(ctx context.Context, schedule domain.ManagedAttendanceWeeklySchedule) (domain.ManagedAttendanceWeeklySchedule, error)
 	DeleteAttendanceWeeklySchedule(ctx context.Context, id int64) error
+	SaveAttendanceCorrection(ctx context.Context, correction domain.AttendanceCorrection) (domain.AttendanceCorrection, error)
+	SaveMonthlyAttendanceResult(ctx context.Context, result domain.MonthlyAttendanceDailyResult) (domain.MonthlyAttendanceDailyResult, error)
+	ListMonthlyAttendanceResults(ctx context.Context, query domain.MonthlyAttendanceResultQuery) ([]domain.MonthlyAttendanceDailyResult, error)
 }

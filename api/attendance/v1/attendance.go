@@ -65,6 +65,30 @@ type ListAttendanceExceptionsResponse struct {
 	Records []DailyAttendanceDTO `json:"records"`
 }
 
+type CreateAttendanceCorrectionRequest struct {
+	UserID      string `json:"user_id"`
+	DeviceSN    string `json:"device_sn"`
+	Date        string `json:"date"`
+	Type        string `json:"type"`
+	CorrectedAt int64  `json:"corrected_at"`
+	Reason      string `json:"reason"`
+}
+
+type CreateAttendanceCorrectionResponse struct {
+	Correction AttendanceCorrectionDTO `json:"correction"`
+}
+
+type AttendanceCorrectionDTO struct {
+	ID          int64  `json:"id"`
+	UserID      string `json:"user_id"`
+	DeviceSN    string `json:"device_sn"`
+	Date        string `json:"date"`
+	Type        string `json:"type"`
+	CorrectedAt int64  `json:"corrected_at"`
+	Reason      string `json:"reason"`
+	Status      string `json:"status"`
+}
+
 type AttendanceSettingsDTO struct {
 	Timezone       string   `json:"timezone"`
 	DefaultShiftID string   `json:"default_shift_id"`
@@ -221,6 +245,10 @@ type DailyAttendanceDTO struct {
 	Status            string   `json:"status"`
 	Exceptions        []string `json:"exceptions"`
 	IsAbnormal        bool     `json:"is_abnormal"`
+	Corrected         bool     `json:"corrected"`
+	CorrectionStatus  string   `json:"correction_status"`
+	CorrectionReason  string   `json:"correction_reason"`
+	CorrectedAt       int64    `json:"corrected_at"`
 	WorkStartAt       int64    `json:"work_start_at"`
 	WorkEndAt         int64    `json:"work_end_at"`
 	FirstEntryAt      int64    `json:"first_entry_at"`
@@ -232,11 +260,12 @@ type DailyAttendanceDTO struct {
 }
 
 type MonthlyAttendanceDTO struct {
-	Month    string             `json:"month"`
-	UserID   string             `json:"user_id"`
-	UserName string             `json:"user_name"`
-	DeviceSN string             `json:"device_sn"`
-	Stats    AttendanceStatsDTO `json:"stats"`
+	Month    string               `json:"month"`
+	UserID   string               `json:"user_id"`
+	UserName string               `json:"user_name"`
+	DeviceSN string               `json:"device_sn"`
+	Days     []DailyAttendanceDTO `json:"days"`
+	Stats    AttendanceStatsDTO   `json:"stats"`
 }
 
 type AttendanceSummaryDTO struct {

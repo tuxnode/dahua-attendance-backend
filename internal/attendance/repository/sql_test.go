@@ -233,6 +233,100 @@ func TestSQLRepositoryWrapsExecutorError(t *testing.T) {
 	}
 }
 
+func TestSQLRepositorySavesAttendanceCorrection(t *testing.T) {
+	executor := &fakeExecutor{}
+	repo, err := repository.NewSQLRepository(executor)
+	if err != nil {
+		t.Fatalf("new repository: %v", err)
+	}
+
+	correction, err := repo.SaveAttendanceCorrection(context.Background(), domain.AttendanceCorrection{
+		UserID:      "REDACTED_USER_ID",
+		DeviceSN:    "REDACTED_DEVICE_SN",
+		Date:        fixedTime(),
+		Type:        domain.AttendanceCorrectionTypeCheckOut,
+		CorrectedAt: fixedTime().Add(time.Hour),
+		Reason:      "manual correction",
+		Status:      domain.AttendanceCorrectionStatusApplied,
+	})
+	if err != nil {
+		t.Fatalf("save attendance correction: %v", err)
+	}
+	if correction.ID != 1 {
+		t.Fatalf("unexpected correction id: %d", correction.ID)
+	}
+	if !strings.Contains(executor.query, "INSERT INTO attendance_corrections") {
+		t.Fatalf("unexpected query: %s", executor.query)
+	}
+	if len(executor.args) != 7 {
+		t.Fatalf("unexpected args length: %d", len(executor.args))
+	}
+	if executor.args[0] != "REDACTED_USER_ID" {
+		t.Fatalf("unexpected user id arg: %v", executor.args[0])
+	}
+	if executor.args[3] != "check_out" {
+		t.Fatalf("unexpected correction type arg: %v", executor.args[3])
+	}
+}
+
+func TestSQLRepositorySavesMonthlyAttendanceResult(t *testing.T) {
+	executor := &fakeExecutor{}
+	repo, err := repository.NewSQLRepository(executor)
+	if err != nil {
+		t.Fatalf("new repository: %v", err)
+	}
+
+	result, err := repo.SaveMonthlyAttendanceResult(context.Background(), domain.MonthlyAttendanceDailyResult{
+		Month:            time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
+		Date:             fixedTime(),
+		UserID:           "REDACTED_USER_ID",
+		UserName:         "REDACTED_NAME",
+		DeviceSN:         "REDACTED_DEVICE_SN",
+		ShiftID:          "day",
+		ShiftName:        "Day Shift",
+		IsWorkday:        true,
+		Status:           domain.DailyAttendanceStatusCorrected,
+		IsAbnormal:       false,
+		Corrected:        true,
+		CorrectionStatus: domain.AttendanceCorrectionStatusApplied,
+		CorrectionReason: "manual correction",
+		CorrectedAt:      fixedTime(),
+		Exceptions: []domain.DailyAttendanceException{
+			domain.DailyAttendanceExceptionMissingCheckOut,
+		},
+		WorkStartAt:        fixedTime(),
+		WorkEndAt:          fixedTime().Add(8 * time.Hour),
+		FirstEntryAt:       fixedTime(),
+		LastExitAt:         fixedTime().Add(8 * time.Hour),
+		LateDuration:       2 * time.Minute,
+		EarlyLeaveDuration: 3 * time.Minute,
+		RecordCount:        1,
+		SnapshotCount:      1,
+		CalculatedAt:       fixedTime(),
+	})
+	if err != nil {
+		t.Fatalf("save monthly attendance result: %v", err)
+	}
+	if result.ID != 1 {
+		t.Fatalf("unexpected result id: %d", result.ID)
+	}
+	if !strings.Contains(executor.query, "INSERT INTO monthly_attendance_results") {
+		t.Fatalf("unexpected query: %s", executor.query)
+	}
+	if !strings.Contains(executor.query, "ON DUPLICATE KEY UPDATE") {
+		t.Fatalf("query should upsert monthly result: %s", executor.query)
+	}
+	if len(executor.args) != 25 {
+		t.Fatalf("unexpected args length: %d", len(executor.args))
+	}
+	if executor.args[9] != "corrected" {
+		t.Fatalf("unexpected status arg: %v", executor.args[9])
+	}
+	if executor.args[10] != "missing_check_out" {
+		t.Fatalf("unexpected exceptions arg: %v", executor.args[10])
+	}
+}
+
 func fixedTime() time.Time {
 	return time.Date(2026, 8, 10, 16, 45, 0, 0, time.UTC)
 }

@@ -25,6 +25,7 @@ const (
 	MonthlyAttendancePath         = "/api/v1/attendance/monthly"
 	AttendanceSummaryPath         = "/api/v1/attendance/summary"
 	AttendanceExceptionsPath      = "/api/v1/attendance/exceptions"
+	AttendanceCorrectionsPath     = "/api/v1/attendance/corrections"
 	AttendanceSettingsPath        = "/api/v1/attendance/settings"
 	AttendanceShiftsPath          = "/api/v1/attendance/shifts"
 	AttendanceShiftPath           = "/api/v1/attendance/shifts/:id"
@@ -74,12 +75,17 @@ type AttendanceRuleManagementService interface {
 	DeleteAttendanceWeeklySchedule(ctx context.Context, id int64) error
 }
 
+type AttendanceCorrectionService interface {
+	SaveAttendanceCorrection(ctx context.Context, correction domain.AttendanceCorrection) (domain.AttendanceCorrection, error)
+}
+
 type AttendanceService interface {
 	EventConsumer
 	AttendanceQueryService
 	DailyAttendanceQueryService
 	AttendanceStatsService
 	AttendanceRuleManagementService
+	AttendanceCorrectionService
 }
 
 type Handler struct {
@@ -120,6 +126,7 @@ func NewRouter(service AttendanceService, opts ...Option) *gin.Engine {
 	router.GET(MonthlyAttendancePath, handler.HandleMonthlyAttendance)
 	router.GET(AttendanceSummaryPath, handler.HandleAttendanceSummary)
 	router.GET(AttendanceExceptionsPath, handler.HandleAttendanceExceptions)
+	router.POST(AttendanceCorrectionsPath, handler.HandleCreateAttendanceCorrection)
 	router.GET(AttendanceSettingsPath, handler.HandleAttendanceSettings)
 	router.PUT(AttendanceSettingsPath, handler.HandleSaveAttendanceSettings)
 	router.GET(AttendanceShiftsPath, handler.HandleAttendanceShifts)
@@ -322,6 +329,35 @@ func (h *Handler) HandleAttendanceExceptions(c *gin.Context) {
 
 	c.JSON(http.StatusOK, attendancev1.ListAttendanceExceptionsResponse{
 		Records: toDailyAttendanceDTOs(records),
+	})
+}
+
+func (h *Handler) HandleCreateAttendanceCorrection(c *gin.Context) {
+	if h.service == nil {
+		writeError(c, http.StatusInternalServerError, "internal_server_error", "attendance service is not configured")
+		return
+	}
+
+	var request attendancev1.CreateAttendanceCorrectionRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+		return
+	}
+
+	correction, err := attendanceCorrectionFromRequest(request)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	saved, err := h.service.SaveAttendanceCorrection(c.Request.Context(), correction)
+	if err != nil {
+		writeManagementError(c, err, "failed to save attendance correction")
+		return
+	}
+
+	c.JSON(http.StatusOK, attendancev1.CreateAttendanceCorrectionResponse{
+		Correction: toAttendanceCorrectionDTO(saved),
 	})
 }
 
@@ -1063,6 +1099,33 @@ func attendanceSettingsFromRequest(request attendancev1.SaveAttendanceSettingsRe
 	}, nil
 }
 
+func attendanceCorrectionFromRequest(request attendancev1.CreateAttendanceCorrectionRequest) (domain.AttendanceCorrection, error) {
+	date, err := parseDateValue("date", request.Date)
+	if err != nil {
+		return domain.AttendanceCorrection{}, err
+	}
+	if request.CorrectedAt <= 0 {
+		return domain.AttendanceCorrection{}, errors.New("corrected_at must be a positive unix timestamp")
+	}
+
+	correctionType := domain.AttendanceCorrectionType(strings.TrimSpace(request.Type))
+	switch correctionType {
+	case domain.AttendanceCorrectionTypeCheckIn, domain.AttendanceCorrectionTypeCheckOut:
+	default:
+		return domain.AttendanceCorrection{}, fmt.Errorf("type must be one of %s,%s", domain.AttendanceCorrectionTypeCheckIn, domain.AttendanceCorrectionTypeCheckOut)
+	}
+
+	return domain.AttendanceCorrection{
+		UserID:      strings.TrimSpace(request.UserID),
+		DeviceSN:    strings.TrimSpace(request.DeviceSN),
+		Date:        date,
+		Type:        correctionType,
+		CorrectedAt: time.Unix(request.CorrectedAt, 0),
+		Reason:      strings.TrimSpace(request.Reason),
+		Status:      domain.AttendanceCorrectionStatusApplied,
+	}, nil
+}
+
 func attendanceShiftFromRequest(request attendancev1.SaveAttendanceShiftRequest, pathID string) (domain.AttendanceShift, error) {
 	id := strings.TrimSpace(request.ID)
 	pathID = strings.TrimSpace(pathID)
@@ -1407,6 +1470,19 @@ func toAttendanceRecordDTO(record domain.AttendanceRecord) attendancev1.Attendan
 	}
 }
 
+func toAttendanceCorrectionDTO(correction domain.AttendanceCorrection) attendancev1.AttendanceCorrectionDTO {
+	return attendancev1.AttendanceCorrectionDTO{
+		ID:          correction.ID,
+		UserID:      correction.UserID,
+		DeviceSN:    correction.DeviceSN,
+		Date:        correction.Date.Format(queryDateLayout),
+		Type:        correction.Type.String(),
+		CorrectedAt: timeToUnixSeconds(correction.CorrectedAt),
+		Reason:      correction.Reason,
+		Status:      correction.Status.String(),
+	}
+}
+
 func toDailyAttendanceDTOs(records []domain.DailyAttendance) []attendancev1.DailyAttendanceDTO {
 	dtos := make([]attendancev1.DailyAttendanceDTO, 0, len(records))
 	for _, record := range records {
@@ -1429,6 +1505,10 @@ func toDailyAttendanceDTO(record domain.DailyAttendance) attendancev1.DailyAtten
 		Status:            record.Status.String(),
 		Exceptions:        dailyAttendanceExceptions(record.Exceptions),
 		IsAbnormal:        record.IsAbnormal(),
+		Corrected:         record.Corrected,
+		CorrectionStatus:  record.CorrectionStatus.String(),
+		CorrectionReason:  record.CorrectionReason,
+		CorrectedAt:       timeToUnixSeconds(record.CorrectedAt),
 		WorkStartAt:       timeToUnixSeconds(record.WorkStartAt),
 		WorkEndAt:         timeToUnixSeconds(record.WorkEndAt),
 		FirstEntryAt:      timeToUnixSeconds(record.FirstEntryAt),
@@ -1455,6 +1535,7 @@ func toMonthlyAttendanceDTO(record domain.MonthlyAttendance) attendancev1.Monthl
 		UserID:   record.UserID,
 		UserName: record.UserName,
 		DeviceSN: record.DeviceSN,
+		Days:     toDailyAttendanceDTOs(record.Days),
 		Stats:    toAttendanceStatsDTO(record.Stats),
 	}
 }

@@ -24,6 +24,8 @@ type fakeRepository struct {
 	calendarDays      []domain.AttendanceCalendarDay
 	schedules         []domain.ManagedAttendanceSchedule
 	weeklySchedules   []domain.ManagedAttendanceWeeklySchedule
+	corrections       []domain.AttendanceCorrection
+	monthlyResults    []domain.MonthlyAttendanceDailyResult
 	query             domain.AttendanceRecordQuery
 	calendarDayQuery  domain.AttendanceCalendarDayQuery
 	scheduleQuery     domain.AttendanceScheduleQuery
@@ -117,6 +119,47 @@ func (r *fakeRepository) SaveAttendanceWeeklySchedule(_ context.Context, schedul
 
 func (r *fakeRepository) DeleteAttendanceWeeklySchedule(_ context.Context, _ int64) error {
 	return nil
+}
+
+func (r *fakeRepository) SaveAttendanceCorrection(_ context.Context, correction domain.AttendanceCorrection) (domain.AttendanceCorrection, error) {
+	if r.err != nil {
+		return domain.AttendanceCorrection{}, r.err
+	}
+	if correction.ID == 0 {
+		correction.ID = int64(len(r.corrections) + 1)
+	}
+	r.corrections = append(r.corrections, correction)
+	return correction, nil
+}
+
+func (r *fakeRepository) SaveMonthlyAttendanceResult(_ context.Context, result domain.MonthlyAttendanceDailyResult) (domain.MonthlyAttendanceDailyResult, error) {
+	if r.err != nil {
+		return domain.MonthlyAttendanceDailyResult{}, r.err
+	}
+	if result.ID == 0 {
+		result.ID = int64(len(r.monthlyResults) + 1)
+	}
+	r.monthlyResults = append(r.monthlyResults, result)
+	return result, nil
+}
+
+func (r *fakeRepository) ListMonthlyAttendanceResults(_ context.Context, query domain.MonthlyAttendanceResultQuery) ([]domain.MonthlyAttendanceDailyResult, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+
+	results := make([]domain.MonthlyAttendanceDailyResult, 0, len(r.monthlyResults))
+	for _, result := range r.monthlyResults {
+		if !query.StartDate.IsZero() && result.Date.Before(query.StartDate) {
+			continue
+		}
+		if !query.EndDate.IsZero() && result.Date.After(query.EndDate) {
+			continue
+		}
+		results = append(results, result)
+	}
+
+	return results, nil
 }
 
 func TestHandleDevicePayloadWritesAttendanceRecord(t *testing.T) {
@@ -652,6 +695,78 @@ func TestListDailyAttendanceUsesFlexibleAndGraceMinutes(t *testing.T) {
 	}
 	if dailies[0].Status != domain.DailyAttendanceStatusNormal {
 		t.Fatalf("unexpected status: %+v", dailies[0])
+	}
+}
+
+func TestSaveAttendanceCorrectionMarksMonthlyResultCorrected(t *testing.T) {
+	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+	now := date.Add(24 * time.Hour)
+	repo := &fakeRepository{
+		attendanceRecords: []domain.AttendanceRecord{
+			dailyRecord(date.Add(9*time.Hour), domain.AccessDirectionEntry),
+		},
+	}
+	svc := service.New(
+		repo,
+		service.WithLogger(discardLogger()),
+		service.WithNow(func() time.Time { return now }),
+		service.WithAttendanceRules(testAttendanceRules()),
+	)
+
+	correction, err := svc.SaveAttendanceCorrection(context.Background(), domain.AttendanceCorrection{
+		UserID:      "REDACTED_USER_ID",
+		DeviceSN:    "REDACTED_DEVICE_SN",
+		Date:        date,
+		Type:        domain.AttendanceCorrectionTypeCheckOut,
+		CorrectedAt: date.Add(18 * time.Hour),
+		Reason:      "forgot check out",
+	})
+	if err != nil {
+		t.Fatalf("save correction: %v", err)
+	}
+	if correction.ID == 0 {
+		t.Fatal("expected correction id")
+	}
+	if len(repo.corrections) != 1 {
+		t.Fatalf("unexpected corrections length: %d", len(repo.corrections))
+	}
+	if len(repo.monthlyResults) != 1 {
+		t.Fatalf("unexpected monthly results length: %d", len(repo.monthlyResults))
+	}
+
+	result := repo.monthlyResults[0]
+	if result.Status != domain.DailyAttendanceStatusCorrected {
+		t.Fatalf("unexpected result status: %s", result.Status)
+	}
+	if result.IsAbnormal {
+		t.Fatal("expected result to be non-abnormal after correction")
+	}
+	if !result.Corrected {
+		t.Fatal("expected result to be corrected")
+	}
+	if result.CorrectionReason != "forgot check out" {
+		t.Fatalf("unexpected correction reason: %s", result.CorrectionReason)
+	}
+	if result.LastExitAt.Unix() != date.Add(18*time.Hour).Unix() {
+		t.Fatalf("unexpected last exit: %s", result.LastExitAt)
+	}
+
+	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
+		UserID:    "REDACTED_USER_ID",
+		StartDate: date,
+		EndDate:   date,
+	})
+	if err != nil {
+		t.Fatalf("list daily attendance: %v", err)
+	}
+	if len(dailies) != 1 {
+		t.Fatalf("unexpected dailies length: %d", len(dailies))
+	}
+	if dailies[0].Status != domain.DailyAttendanceStatusCorrected || dailies[0].IsAbnormal() {
+		t.Fatalf("unexpected corrected daily: %+v", dailies[0])
+	}
+	if !dailies[0].Corrected {
+		t.Fatalf("expected corrected daily: %+v", dailies[0])
 	}
 }
 
