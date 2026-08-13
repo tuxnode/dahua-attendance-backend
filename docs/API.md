@@ -85,6 +85,7 @@ ok
 | 参数 | 必填 | 格式 | 说明 |
 | --- | --- | --- | --- |
 | `user_id` | 否 | string | 用户 ID。 |
+| `user_name` | 否 | string | 用户姓名，按精确匹配过滤。 |
 | `device_sn` | 否 | string | 设备 SN。 |
 | `start_time` | 否 | Unix 秒 | 起始事件时间。 |
 | `end_time` | 否 | Unix 秒 | 结束事件时间，不能早于 `start_time`。 |
@@ -146,6 +147,7 @@ curl "http://127.0.0.1:8080/api/v1/attendance/records?user_id=REDACTED_USER_ID&s
 | 参数 | 必填 | 格式 | 说明 |
 | --- | --- | --- | --- |
 | `user_id` | 否 | string | 用户 ID。传入后，即使当天无记录也会返回缺勤或休息日结果。 |
+| `user_name` | 否 | string | 用户姓名，按精确匹配过滤。 |
 | `device_sn` | 否 | string | 设备 SN。 |
 | `date` | 否 | `YYYY-MM-DD` | 查询单日；不能和 `start_date`、`end_date` 同时使用。 |
 | `start_date` | 否 | `YYYY-MM-DD` | 起始日期。 |
@@ -256,6 +258,7 @@ curl "http://127.0.0.1:8080/api/v1/attendance/daily?user_id=REDACTED_USER_ID&dat
 | 参数 | 必填 | 格式 | 说明 |
 | --- | --- | --- | --- |
 | `user_id` | 否 | string | 用户 ID。 |
+| `user_name` | 否 | string | 用户姓名，按精确匹配过滤。 |
 | `device_sn` | 否 | string | 设备 SN。 |
 | `month` | 否 | `YYYY-MM` | 查询月份；为空时使用当前月份。 |
 | `limit` | 否 | int | 分页大小。 |
@@ -339,6 +342,7 @@ curl "http://127.0.0.1:8080/api/v1/attendance/monthly?month=2026-08"
 | 参数 | 必填 | 格式 | 说明 |
 | --- | --- | --- | --- |
 | `user_id` | 否 | string | 用户 ID。 |
+| `user_name` | 否 | string | 用户姓名，按精确匹配过滤。 |
 | `device_sn` | 否 | string | 设备 SN。 |
 | `date` | 否 | `YYYY-MM-DD` | 查询单日；不能和 `start_date`、`end_date` 同时使用。 |
 | `start_date` | 否 | `YYYY-MM-DD` | 起始日期。 |
@@ -410,6 +414,7 @@ curl "http://127.0.0.1:8080/api/v1/attendance/summary?start_date=2026-08-01&end_
 | 参数 | 必填 | 格式 | 说明 |
 | --- | --- | --- | --- |
 | `user_id` | 否 | string | 用户 ID。 |
+| `user_name` | 否 | string | 用户姓名，按精确匹配过滤。 |
 | `device_sn` | 否 | string | 设备 SN。 |
 | `date` | 否 | `YYYY-MM-DD` | 查询单日；不能和 `start_date`、`end_date` 同时使用。 |
 | `start_date` | 否 | `YYYY-MM-DD` | 起始日期。 |
