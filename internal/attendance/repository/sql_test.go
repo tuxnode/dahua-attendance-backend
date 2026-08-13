@@ -170,12 +170,19 @@ func TestSQLRepositoryListsAttendanceRecordsWithFilters(t *testing.T) {
 	startTime := fixedTime().Add(-time.Hour)
 	endTime := fixedTime()
 	_, err = repo.ListAttendanceRecords(context.Background(), domain.AttendanceRecordQuery{
-		UserID:    "REDACTED_USER_ID",
-		DeviceSN:  "REDACTED_DEVICE_SN",
-		StartTime: startTime,
-		EndTime:   endTime,
-		Limit:     50,
-		Offset:    100,
+		AttendancePersonFilter: domain.AttendancePersonFilter{
+			UserID:   "REDACTED_USER_ID",
+			UserName: "REDACTED_NAME",
+			DeviceSN: "REDACTED_DEVICE_SN",
+		},
+		TimeRangeFilter: domain.TimeRangeFilter{
+			StartTime: startTime,
+			EndTime:   endTime,
+		},
+		Pagination: domain.Pagination{
+			Limit:  50,
+			Offset: 100,
+		},
 	})
 	if err == nil {
 		t.Fatal("expected query error")
@@ -184,6 +191,7 @@ func TestSQLRepositoryListsAttendanceRecordsWithFilters(t *testing.T) {
 	for _, want := range []string{
 		"FROM attendance_records",
 		"AND user_id = ?",
+		"AND card_name = ?",
 		"AND device_sn = ?",
 		"AND event_time >= ?",
 		"AND event_time <= ?",
@@ -197,26 +205,29 @@ func TestSQLRepositoryListsAttendanceRecordsWithFilters(t *testing.T) {
 	if strings.Contains(executor.query, "raw_event") {
 		t.Fatalf("query should not expose raw_event: %s", executor.query)
 	}
-	if len(executor.args) != 6 {
+	if len(executor.args) != 7 {
 		t.Fatalf("unexpected args length: %d", len(executor.args))
 	}
 	if executor.args[0] != "REDACTED_USER_ID" {
 		t.Fatalf("unexpected user id arg: %v", executor.args[0])
 	}
-	if executor.args[1] != "REDACTED_DEVICE_SN" {
-		t.Fatalf("unexpected device sn arg: %v", executor.args[1])
+	if executor.args[1] != "REDACTED_NAME" {
+		t.Fatalf("unexpected user name arg: %v", executor.args[1])
 	}
-	if executor.args[2] != startTime {
-		t.Fatalf("unexpected start time arg: %v", executor.args[2])
+	if executor.args[2] != "REDACTED_DEVICE_SN" {
+		t.Fatalf("unexpected device sn arg: %v", executor.args[2])
 	}
-	if executor.args[3] != endTime {
-		t.Fatalf("unexpected end time arg: %v", executor.args[3])
+	if executor.args[3] != startTime {
+		t.Fatalf("unexpected start time arg: %v", executor.args[3])
 	}
-	if executor.args[4] != 50 {
-		t.Fatalf("unexpected limit arg: %v", executor.args[4])
+	if executor.args[4] != endTime {
+		t.Fatalf("unexpected end time arg: %v", executor.args[4])
 	}
-	if executor.args[5] != 100 {
-		t.Fatalf("unexpected offset arg: %v", executor.args[5])
+	if executor.args[5] != 50 {
+		t.Fatalf("unexpected limit arg: %v", executor.args[5])
+	}
+	if executor.args[6] != 100 {
+		t.Fatalf("unexpected offset arg: %v", executor.args[6])
 	}
 }
 

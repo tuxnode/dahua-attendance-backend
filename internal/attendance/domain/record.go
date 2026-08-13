@@ -28,12 +28,9 @@ type AttendanceRecord struct {
 }
 
 type AttendanceRecordQuery struct {
-	UserID    string
-	DeviceSN  string
-	StartTime time.Time
-	EndTime   time.Time
-	Limit     int
-	Offset    int
+	AttendancePersonFilter
+	TimeRangeFilter
+	Pagination
 }
 
 type DoorStatusRecord struct {

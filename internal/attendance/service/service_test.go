@@ -305,8 +305,7 @@ func TestListAttendanceRecordsNormalizesPagination(t *testing.T) {
 	svc := service.New(repo, service.WithLogger(discardLogger()))
 
 	records, err := svc.ListAttendanceRecords(context.Background(), domain.AttendanceRecordQuery{
-		Limit:  -1,
-		Offset: -1,
+		Pagination: domain.Pagination{Limit: -1, Offset: -1},
 	})
 	if err != nil {
 		t.Fatalf("list records: %v", err)
@@ -327,7 +326,7 @@ func TestListAttendanceRecordsClampsLargeLimit(t *testing.T) {
 	repo := &fakeRepository{}
 	svc := service.New(repo, service.WithLogger(discardLogger()))
 
-	_, err := svc.ListAttendanceRecords(context.Background(), domain.AttendanceRecordQuery{Limit: 1000})
+	_, err := svc.ListAttendanceRecords(context.Background(), domain.AttendanceRecordQuery{Pagination: domain.Pagination{Limit: 1000}})
 	if err != nil {
 		t.Fatalf("list records: %v", err)
 	}
@@ -341,8 +340,7 @@ func TestListAttendanceRecordsRejectsInvalidTimeRange(t *testing.T) {
 	svc := service.New(&fakeRepository{}, service.WithLogger(discardLogger()))
 
 	_, err := svc.ListAttendanceRecords(context.Background(), domain.AttendanceRecordQuery{
-		StartTime: fixedNow(),
-		EndTime:   fixedNow().Add(-time.Second),
+		TimeRangeFilter: domain.TimeRangeFilter{StartTime: fixedNow(), EndTime: fixedNow().Add(-time.Second)},
 	})
 	if err == nil {
 		t.Fatal("expected error")
@@ -352,7 +350,7 @@ func TestListAttendanceRecordsRejectsInvalidTimeRange(t *testing.T) {
 func TestListAttendanceRecordsReturnsRepositoryError(t *testing.T) {
 	svc := service.New(&fakeRepository{err: errors.New("query failed")}, service.WithLogger(discardLogger()))
 
-	_, err := svc.ListAttendanceRecords(context.Background(), domain.AttendanceRecordQuery{Limit: 10})
+	_, err := svc.ListAttendanceRecords(context.Background(), domain.AttendanceRecordQuery{Pagination: domain.Pagination{Limit: 10}})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -377,9 +375,8 @@ func TestListDailyAttendanceReturnsNormal(t *testing.T) {
 	svc := service.New(repo, service.WithLogger(discardLogger()))
 
 	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
-		UserID:    "REDACTED_USER_ID",
-		StartDate: date,
-		EndDate:   date,
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+		DateRangeFilter:        domain.DateRangeFilter{StartDate: date, EndDate: date},
 	})
 	if err != nil {
 		t.Fatalf("list daily attendance: %v", err)
@@ -423,9 +420,8 @@ func TestListDailyAttendanceReturnsLateAndEarlyLeave(t *testing.T) {
 	svc := service.New(repo, service.WithLogger(discardLogger()))
 
 	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
-		UserID:    "REDACTED_USER_ID",
-		StartDate: date,
-		EndDate:   date,
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+		DateRangeFilter:        domain.DateRangeFilter{StartDate: date, EndDate: date},
 	})
 	if err != nil {
 		t.Fatalf("list daily attendance: %v", err)
@@ -462,9 +458,8 @@ func TestListDailyAttendanceReturnsMissingCheckOut(t *testing.T) {
 	svc := service.New(repo, service.WithLogger(discardLogger()))
 
 	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
-		UserID:    "REDACTED_USER_ID",
-		StartDate: date,
-		EndDate:   date,
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+		DateRangeFilter:        domain.DateRangeFilter{StartDate: date, EndDate: date},
 	})
 	if err != nil {
 		t.Fatalf("list daily attendance: %v", err)
@@ -485,9 +480,8 @@ func TestListDailyAttendanceReturnsAbsentForQueriedUser(t *testing.T) {
 	svc := service.New(&fakeRepository{}, service.WithLogger(discardLogger()))
 
 	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
-		UserID:    "REDACTED_USER_ID",
-		StartDate: date,
-		EndDate:   date,
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+		DateRangeFilter:        domain.DateRangeFilter{StartDate: date, EndDate: date},
 	})
 	if err != nil {
 		t.Fatalf("list daily attendance: %v", err)
@@ -518,8 +512,7 @@ func TestListDailyAttendanceSkipsUserlessRecords(t *testing.T) {
 	svc := service.New(repo, service.WithLogger(discardLogger()))
 
 	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
-		StartDate: date,
-		EndDate:   date,
+		DateRangeFilter: domain.DateRangeFilter{StartDate: date, EndDate: date},
 	})
 	if err != nil {
 		t.Fatalf("list daily attendance: %v", err)
@@ -534,16 +527,20 @@ func TestListDailyAttendanceRejectsInvalidQuery(t *testing.T) {
 	start := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
 
 	_, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
-		StartDate: start,
-		EndDate:   start.AddDate(0, 0, -1),
+		DateRangeFilter: domain.DateRangeFilter{
+			StartDate: start,
+			EndDate:   start.AddDate(0, 0, -1),
+		},
 	})
 	if err == nil {
 		t.Fatal("expected invalid date range error")
 	}
 
 	_, err = svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
-		StartDate: start,
-		EndDate:   start.AddDate(0, 0, 31),
+		DateRangeFilter: domain.DateRangeFilter{
+			StartDate: start,
+			EndDate:   start.AddDate(0, 0, 31),
+		},
 	})
 	if err == nil {
 		t.Fatal("expected oversized date range error")
@@ -567,9 +564,8 @@ func TestListDailyAttendanceUsesWeekendHolidayAndWorkdayRules(t *testing.T) {
 	svc := service.New(&fakeRepository{}, service.WithLogger(discardLogger()), service.WithAttendanceRules(rules))
 
 	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
-		UserID:    "REDACTED_USER_ID",
-		StartDate: start,
-		EndDate:   start.AddDate(0, 0, 2),
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+		DateRangeFilter:        domain.DateRangeFilter{StartDate: start, EndDate: start.AddDate(0, 0, 2)},
 	})
 	if err != nil {
 		t.Fatalf("list daily attendance: %v", err)
@@ -635,9 +631,8 @@ func TestListDailyAttendanceUsesRepositoryRules(t *testing.T) {
 	svc := service.New(repo, service.WithLogger(discardLogger()))
 
 	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
-		UserID:    "REDACTED_USER_ID",
-		StartDate: date,
-		EndDate:   date.AddDate(0, 0, 1),
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+		DateRangeFilter:        domain.DateRangeFilter{StartDate: date, EndDate: date.AddDate(0, 0, 1)},
 	})
 	if err != nil {
 		t.Fatalf("list daily attendance: %v", err)
@@ -683,9 +678,8 @@ func TestListDailyAttendanceUsesFlexibleAndGraceMinutes(t *testing.T) {
 	svc := service.New(repo, service.WithLogger(discardLogger()), service.WithAttendanceRules(rules))
 
 	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
-		UserID:    "REDACTED_USER_ID",
-		StartDate: date,
-		EndDate:   date,
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+		DateRangeFilter:        domain.DateRangeFilter{StartDate: date, EndDate: date},
 	})
 	if err != nil {
 		t.Fatalf("list daily attendance: %v", err)
@@ -752,9 +746,8 @@ func TestSaveAttendanceCorrectionMarksMonthlyResultCorrected(t *testing.T) {
 	}
 
 	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
-		UserID:    "REDACTED_USER_ID",
-		StartDate: date,
-		EndDate:   date,
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+		DateRangeFilter:        domain.DateRangeFilter{StartDate: date, EndDate: date},
 	})
 	if err != nil {
 		t.Fatalf("list daily attendance: %v", err)
@@ -798,9 +791,8 @@ func TestListDailyAttendanceUsesScheduledNightShiftAcrossDays(t *testing.T) {
 	svc := service.New(repo, service.WithLogger(discardLogger()), service.WithAttendanceRules(rules))
 
 	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
-		UserID:    "REDACTED_USER_ID",
-		StartDate: date,
-		EndDate:   date,
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+		DateRangeFilter:        domain.DateRangeFilter{StartDate: date, EndDate: date},
 	})
 	if err != nil {
 		t.Fatalf("list daily attendance: %v", err)
@@ -832,8 +824,8 @@ func TestListMonthlyAttendanceAggregatesUserStats(t *testing.T) {
 	svc := service.New(repo, service.WithLogger(discardLogger()))
 
 	records, err := svc.ListMonthlyAttendance(context.Background(), domain.MonthlyAttendanceQuery{
-		UserID: "REDACTED_USER_ID",
-		Month:  month,
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+		Month:                  month,
 	})
 	if err != nil {
 		t.Fatalf("list monthly attendance: %v", err)
@@ -893,8 +885,7 @@ func TestGetAttendanceSummaryAggregatesRange(t *testing.T) {
 	svc := service.New(repo, service.WithLogger(discardLogger()))
 
 	summary, err := svc.GetAttendanceSummary(context.Background(), domain.AttendanceSummaryQuery{
-		StartDate: date,
-		EndDate:   date.AddDate(0, 0, 1),
+		DateRangeFilter: domain.DateRangeFilter{StartDate: date, EndDate: date.AddDate(0, 0, 1)},
 	})
 	if err != nil {
 		t.Fatalf("get attendance summary: %v", err)
@@ -924,11 +915,9 @@ func TestListAttendanceExceptionsFiltersAndPaginates(t *testing.T) {
 	svc := service.New(repo, service.WithLogger(discardLogger()))
 
 	exceptions, err := svc.ListAttendanceExceptions(context.Background(), domain.AttendanceExceptionQuery{
-		UserID:    "REDACTED_USER_ID",
-		StartDate: date,
-		EndDate:   date.AddDate(0, 0, 2),
-		Limit:     1,
-		Offset:    1,
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+		DateRangeFilter:        domain.DateRangeFilter{StartDate: date, EndDate: date.AddDate(0, 0, 2)},
+		Pagination:             domain.Pagination{Limit: 1, Offset: 1},
 	})
 	if err != nil {
 		t.Fatalf("list attendance exceptions: %v", err)

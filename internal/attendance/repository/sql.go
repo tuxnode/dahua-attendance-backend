@@ -800,6 +800,10 @@ WHERE 1 = 1`)
 		builder.WriteString("\n  AND user_id = ?")
 		args = append(args, filter.UserID)
 	}
+	if filter.UserName != "" {
+		builder.WriteString("\n  AND user_name = ?")
+		args = append(args, filter.UserName)
+	}
 	if filter.DeviceSN != "" {
 		builder.WriteString("\n  AND device_sn = ?")
 		args = append(args, filter.DeviceSN)
@@ -1058,6 +1062,10 @@ WHERE 1 = 1`)
 	if filter.UserID != "" {
 		builder.WriteString("\n  AND user_id = ?")
 		args = append(args, filter.UserID)
+	}
+	if filter.UserName != "" {
+		builder.WriteString("\n  AND card_name = ?")
+		args = append(args, filter.UserName)
 	}
 	if filter.DeviceSN != "" {
 		builder.WriteString("\n  AND device_sn = ?")

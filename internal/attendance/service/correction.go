@@ -67,11 +67,15 @@ func normalizeAttendanceCorrection(correction domain.AttendanceCorrection) (doma
 
 func (s *Service) buildCorrectedMonthlyAttendanceResult(ctx context.Context, correction domain.AttendanceCorrection) (domain.MonthlyAttendanceDailyResult, error) {
 	dailies, err := s.listDailyAttendance(ctx, domain.DailyAttendanceQuery{
-		UserID:    correction.UserID,
-		DeviceSN:  correction.DeviceSN,
-		StartDate: correction.Date,
-		EndDate:   correction.Date,
-		Limit:     maxQueryLimit,
+		AttendancePersonFilter: domain.AttendancePersonFilter{
+			UserID:   correction.UserID,
+			DeviceSN: correction.DeviceSN,
+		},
+		DateRangeFilter: domain.DateRangeFilter{
+			StartDate: correction.Date,
+			EndDate:   correction.Date,
+		},
+		Pagination: domain.Pagination{Limit: maxQueryLimit},
 	})
 	if err != nil {
 		return domain.MonthlyAttendanceDailyResult{}, fmt.Errorf("service: recalculate attendance day: %w", err)

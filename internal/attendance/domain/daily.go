@@ -36,36 +36,26 @@ func (e DailyAttendanceException) String() string {
 }
 
 type DailyAttendanceQuery struct {
-	UserID    string
-	DeviceSN  string
-	StartDate time.Time
-	EndDate   time.Time
-	Limit     int
-	Offset    int
+	AttendancePersonFilter
+	DateRangeFilter
+	Pagination
 }
 
 type MonthlyAttendanceQuery struct {
-	UserID   string
-	DeviceSN string
-	Month    time.Time
-	Limit    int
-	Offset   int
+	AttendancePersonFilter
+	Month time.Time
+	Pagination
 }
 
 type AttendanceSummaryQuery struct {
-	UserID    string
-	DeviceSN  string
-	StartDate time.Time
-	EndDate   time.Time
+	AttendancePersonFilter
+	DateRangeFilter
 }
 
 type AttendanceExceptionQuery struct {
-	UserID    string
-	DeviceSN  string
-	StartDate time.Time
-	EndDate   time.Time
-	Limit     int
-	Offset    int
+	AttendancePersonFilter
+	DateRangeFilter
+	Pagination
 }
 
 type AttendanceCorrectionType string
@@ -103,13 +93,10 @@ type AttendanceCorrection struct {
 }
 
 type MonthlyAttendanceResultQuery struct {
-	UserID    string
-	DeviceSN  string
-	StartDate time.Time
-	EndDate   time.Time
-	Month     time.Time
-	Limit     int
-	Offset    int
+	AttendancePersonFilter
+	DateRangeFilter
+	Month time.Time
+	Pagination
 }
 
 type MonthlyAttendanceDailyResult struct {

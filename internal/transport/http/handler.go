@@ -750,12 +750,15 @@ func parseAttendanceRecordQuery(c *gin.Context) (domain.AttendanceRecordQuery, e
 	}
 
 	return domain.AttendanceRecordQuery{
-		UserID:    strings.TrimSpace(c.Query("user_id")),
-		DeviceSN:  strings.TrimSpace(c.Query("device_sn")),
-		StartTime: startTime,
-		EndTime:   endTime,
-		Limit:     limit,
-		Offset:    offset,
+		AttendancePersonFilter: parseAttendancePersonFilter(c),
+		TimeRangeFilter: domain.TimeRangeFilter{
+			StartTime: startTime,
+			EndTime:   endTime,
+		},
+		Pagination: domain.Pagination{
+			Limit:  limit,
+			Offset: offset,
+		},
 	}, nil
 }
 
@@ -775,12 +778,15 @@ func parseDailyAttendanceQuery(c *gin.Context) (domain.DailyAttendanceQuery, err
 	}
 
 	return domain.DailyAttendanceQuery{
-		UserID:    strings.TrimSpace(c.Query("user_id")),
-		DeviceSN:  strings.TrimSpace(c.Query("device_sn")),
-		StartDate: startDate,
-		EndDate:   endDate,
-		Limit:     limit,
-		Offset:    offset,
+		AttendancePersonFilter: parseAttendancePersonFilter(c),
+		DateRangeFilter: domain.DateRangeFilter{
+			StartDate: startDate,
+			EndDate:   endDate,
+		},
+		Pagination: domain.Pagination{
+			Limit:  limit,
+			Offset: offset,
+		},
 	}, nil
 }
 
@@ -800,11 +806,12 @@ func parseMonthlyAttendanceQuery(c *gin.Context) (domain.MonthlyAttendanceQuery,
 	}
 
 	return domain.MonthlyAttendanceQuery{
-		UserID:   strings.TrimSpace(c.Query("user_id")),
-		DeviceSN: strings.TrimSpace(c.Query("device_sn")),
-		Month:    month,
-		Limit:    limit,
-		Offset:   offset,
+		AttendancePersonFilter: parseAttendancePersonFilter(c),
+		Month:                  month,
+		Pagination: domain.Pagination{
+			Limit:  limit,
+			Offset: offset,
+		},
 	}, nil
 }
 
@@ -815,10 +822,11 @@ func parseAttendanceSummaryQuery(c *gin.Context) (domain.AttendanceSummaryQuery,
 	}
 
 	return domain.AttendanceSummaryQuery{
-		UserID:    strings.TrimSpace(c.Query("user_id")),
-		DeviceSN:  strings.TrimSpace(c.Query("device_sn")),
-		StartDate: startDate,
-		EndDate:   endDate,
+		AttendancePersonFilter: parseAttendancePersonFilter(c),
+		DateRangeFilter: domain.DateRangeFilter{
+			StartDate: startDate,
+			EndDate:   endDate,
+		},
 	}, nil
 }
 
@@ -838,13 +846,24 @@ func parseAttendanceExceptionQuery(c *gin.Context) (domain.AttendanceExceptionQu
 	}
 
 	return domain.AttendanceExceptionQuery{
-		UserID:    strings.TrimSpace(c.Query("user_id")),
-		DeviceSN:  strings.TrimSpace(c.Query("device_sn")),
-		StartDate: startDate,
-		EndDate:   endDate,
-		Limit:     limit,
-		Offset:    offset,
+		AttendancePersonFilter: parseAttendancePersonFilter(c),
+		DateRangeFilter: domain.DateRangeFilter{
+			StartDate: startDate,
+			EndDate:   endDate,
+		},
+		Pagination: domain.Pagination{
+			Limit:  limit,
+			Offset: offset,
+		},
 	}, nil
+}
+
+func parseAttendancePersonFilter(c *gin.Context) domain.AttendancePersonFilter {
+	return domain.AttendancePersonFilter{
+		UserID:   strings.TrimSpace(c.Query("user_id")),
+		UserName: strings.TrimSpace(c.Query("user_name")),
+		DeviceSN: strings.TrimSpace(c.Query("device_sn")),
+	}
 }
 
 func parseAttendanceShiftQuery(c *gin.Context) (domain.AttendanceShiftQuery, error) {

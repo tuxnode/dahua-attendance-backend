@@ -129,11 +129,12 @@ func (s *Service) ListMonthlyAttendance(ctx context.Context, query domain.Monthl
 
 	normalized := normalizeMonthlyAttendanceQuery(query, s.now())
 	dailies, err := s.listDailyAttendance(ctx, domain.DailyAttendanceQuery{
-		UserID:    normalized.UserID,
-		DeviceSN:  normalized.DeviceSN,
-		StartDate: firstDayOfMonth(normalized.Month),
-		EndDate:   lastDayOfMonth(normalized.Month),
-		Limit:     maxQueryLimit,
+		AttendancePersonFilter: normalized.AttendancePersonFilter,
+		DateRangeFilter: domain.DateRangeFilter{
+			StartDate: firstDayOfMonth(normalized.Month),
+			EndDate:   lastDayOfMonth(normalized.Month),
+		},
+		Pagination: domain.Pagination{Limit: maxQueryLimit},
 	})
 	if err != nil {
 		return nil, err
@@ -154,11 +155,9 @@ func (s *Service) GetAttendanceSummary(ctx context.Context, query domain.Attenda
 	}
 
 	dailies, err := s.listDailyAttendance(ctx, domain.DailyAttendanceQuery{
-		UserID:    normalized.UserID,
-		DeviceSN:  normalized.DeviceSN,
-		StartDate: normalized.StartDate,
-		EndDate:   normalized.EndDate,
-		Limit:     maxQueryLimit,
+		AttendancePersonFilter: normalized.AttendancePersonFilter,
+		DateRangeFilter:        normalized.DateRangeFilter,
+		Pagination:             domain.Pagination{Limit: maxQueryLimit},
 	})
 	if err != nil {
 		return domain.AttendanceSummary{}, err
@@ -178,11 +177,9 @@ func (s *Service) ListAttendanceExceptions(ctx context.Context, query domain.Att
 	}
 
 	dailies, err := s.listDailyAttendance(ctx, domain.DailyAttendanceQuery{
-		UserID:    normalized.UserID,
-		DeviceSN:  normalized.DeviceSN,
-		StartDate: normalized.StartDate,
-		EndDate:   normalized.EndDate,
-		Limit:     maxQueryLimit,
+		AttendancePersonFilter: normalized.AttendancePersonFilter,
+		DateRangeFilter:        normalized.DateRangeFilter,
+		Pagination:             domain.Pagination{Limit: maxQueryLimit},
 	})
 	if err != nil {
 		return nil, err
@@ -208,36 +205,28 @@ func normalizeAttendanceRecordQuery(query domain.AttendanceRecordQuery) (domain.
 		return domain.AttendanceRecordQuery{}, errors.New("service: end time must not be before start time")
 	}
 
-	if query.Limit <= 0 {
-		query.Limit = defaultQueryLimit
-	}
-	if query.Limit > maxQueryLimit {
-		query.Limit = maxQueryLimit
-	}
-	if query.Offset < 0 {
-		query.Offset = 0
-	}
+	query.AttendancePersonFilter = normalizeAttendancePersonFilter(query.AttendancePersonFilter)
+	query.Pagination = normalizePagination(query.Pagination)
 
 	return query, nil
 }
 
 func normalizeDailyAttendanceQuery(query domain.DailyAttendanceQuery, now time.Time) (domain.DailyAttendanceQuery, error) {
-	query.UserID = strings.TrimSpace(query.UserID)
-	query.DeviceSN = strings.TrimSpace(query.DeviceSN)
+	query.AttendancePersonFilter = normalizeAttendancePersonFilter(query.AttendancePersonFilter)
 
 	switch {
 	case query.StartDate.IsZero() && query.EndDate.IsZero():
-		query.StartDate = startOfDay(now)
-		query.EndDate = query.StartDate
+		query.DateRangeFilter.StartDate = startOfDay(now)
+		query.DateRangeFilter.EndDate = query.DateRangeFilter.StartDate
 	case query.StartDate.IsZero():
-		query.EndDate = startOfDay(query.EndDate)
-		query.StartDate = query.EndDate
+		query.DateRangeFilter.EndDate = startOfDay(query.EndDate)
+		query.DateRangeFilter.StartDate = query.DateRangeFilter.EndDate
 	case query.EndDate.IsZero():
-		query.StartDate = startOfDay(query.StartDate)
-		query.EndDate = query.StartDate
+		query.DateRangeFilter.StartDate = startOfDay(query.StartDate)
+		query.DateRangeFilter.EndDate = query.DateRangeFilter.StartDate
 	default:
-		query.StartDate = startOfDay(query.StartDate)
-		query.EndDate = startOfDay(query.EndDate)
+		query.DateRangeFilter.StartDate = startOfDay(query.StartDate)
+		query.DateRangeFilter.EndDate = startOfDay(query.EndDate)
 	}
 
 	if query.EndDate.Before(query.StartDate) {
@@ -247,81 +236,76 @@ func normalizeDailyAttendanceQuery(query domain.DailyAttendanceQuery, now time.T
 		return domain.DailyAttendanceQuery{}, fmt.Errorf("service: date range cannot exceed %d days", maxDailyDateRangeDays)
 	}
 
-	if query.Limit <= 0 {
-		query.Limit = defaultQueryLimit
-	}
-	if query.Limit > maxQueryLimit {
-		query.Limit = maxQueryLimit
-	}
-	if query.Offset < 0 {
-		query.Offset = 0
-	}
+	query.Pagination = normalizePagination(query.Pagination)
 
 	return query, nil
 }
 
 func normalizeMonthlyAttendanceQuery(query domain.MonthlyAttendanceQuery, now time.Time) domain.MonthlyAttendanceQuery {
-	query.UserID = strings.TrimSpace(query.UserID)
-	query.DeviceSN = strings.TrimSpace(query.DeviceSN)
+	query.AttendancePersonFilter = normalizeAttendancePersonFilter(query.AttendancePersonFilter)
 	if query.Month.IsZero() {
 		query.Month = firstDayOfMonth(now)
 	} else {
 		query.Month = firstDayOfMonth(query.Month)
 	}
-	if query.Limit <= 0 {
-		query.Limit = defaultQueryLimit
-	}
-	if query.Limit > maxQueryLimit {
-		query.Limit = maxQueryLimit
-	}
-	if query.Offset < 0 {
-		query.Offset = 0
-	}
+	query.Pagination = normalizePagination(query.Pagination)
 
 	return query
 }
 
 func normalizeAttendanceSummaryQuery(query domain.AttendanceSummaryQuery, now time.Time) (domain.AttendanceSummaryQuery, error) {
 	dailyQuery, err := normalizeDailyAttendanceQuery(domain.DailyAttendanceQuery{
-		UserID:    query.UserID,
-		DeviceSN:  query.DeviceSN,
-		StartDate: query.StartDate,
-		EndDate:   query.EndDate,
-		Limit:     maxQueryLimit,
+		AttendancePersonFilter: query.AttendancePersonFilter,
+		DateRangeFilter:        query.DateRangeFilter,
+		Pagination:             domain.Pagination{Limit: maxQueryLimit},
 	}, now)
 	if err != nil {
 		return domain.AttendanceSummaryQuery{}, err
 	}
 
 	return domain.AttendanceSummaryQuery{
-		UserID:    dailyQuery.UserID,
-		DeviceSN:  dailyQuery.DeviceSN,
-		StartDate: dailyQuery.StartDate,
-		EndDate:   dailyQuery.EndDate,
+		AttendancePersonFilter: dailyQuery.AttendancePersonFilter,
+		DateRangeFilter:        dailyQuery.DateRangeFilter,
 	}, nil
 }
 
 func normalizeAttendanceExceptionQuery(query domain.AttendanceExceptionQuery, now time.Time) (domain.AttendanceExceptionQuery, error) {
 	dailyQuery, err := normalizeDailyAttendanceQuery(domain.DailyAttendanceQuery{
-		UserID:    query.UserID,
-		DeviceSN:  query.DeviceSN,
-		StartDate: query.StartDate,
-		EndDate:   query.EndDate,
-		Limit:     query.Limit,
-		Offset:    query.Offset,
+		AttendancePersonFilter: query.AttendancePersonFilter,
+		DateRangeFilter:        query.DateRangeFilter,
+		Pagination:             query.Pagination,
 	}, now)
 	if err != nil {
 		return domain.AttendanceExceptionQuery{}, err
 	}
 
 	return domain.AttendanceExceptionQuery{
-		UserID:    dailyQuery.UserID,
-		DeviceSN:  dailyQuery.DeviceSN,
-		StartDate: dailyQuery.StartDate,
-		EndDate:   dailyQuery.EndDate,
-		Limit:     dailyQuery.Limit,
-		Offset:    dailyQuery.Offset,
+		AttendancePersonFilter: dailyQuery.AttendancePersonFilter,
+		DateRangeFilter:        dailyQuery.DateRangeFilter,
+		Pagination:             dailyQuery.Pagination,
 	}, nil
+}
+
+func normalizeAttendancePersonFilter(filter domain.AttendancePersonFilter) domain.AttendancePersonFilter {
+	filter.UserID = strings.TrimSpace(filter.UserID)
+	filter.UserName = strings.TrimSpace(filter.UserName)
+	filter.DeviceSN = strings.TrimSpace(filter.DeviceSN)
+
+	return filter
+}
+
+func normalizePagination(pagination domain.Pagination) domain.Pagination {
+	if pagination.Limit <= 0 {
+		pagination.Limit = defaultQueryLimit
+	}
+	if pagination.Limit > maxQueryLimit {
+		pagination.Limit = maxQueryLimit
+	}
+	if pagination.Offset < 0 {
+		pagination.Offset = 0
+	}
+
+	return pagination
 }
 
 func (s *Service) listDailyAttendance(ctx context.Context, query domain.DailyAttendanceQuery) ([]domain.DailyAttendance, error) {
@@ -336,7 +320,7 @@ func (s *Service) listDailyAttendance(ctx context.Context, query domain.DailyAtt
 	}
 
 	dailies := buildDailyAttendance(query, records, rules)
-	if err := s.applyMonthlyAttendanceResults(ctx, dailies, query.StartDate, query.EndDate); err != nil {
+	if err := s.applyMonthlyAttendanceResults(ctx, dailies, query); err != nil {
 		return nil, err
 	}
 
@@ -430,11 +414,12 @@ func (s *Service) loadAttendanceRules(ctx context.Context, startDate time.Time, 
 
 func (s *Service) listDailyAttendanceRecords(ctx context.Context, query domain.DailyAttendanceQuery) ([]domain.AttendanceRecord, error) {
 	recordQuery := domain.AttendanceRecordQuery{
-		UserID:    query.UserID,
-		DeviceSN:  query.DeviceSN,
-		StartTime: query.StartDate,
-		EndTime:   endOfDay(query.EndDate).Add(24 * time.Hour),
-		Limit:     maxQueryLimit,
+		AttendancePersonFilter: query.AttendancePersonFilter,
+		TimeRangeFilter: domain.TimeRangeFilter{
+			StartTime: query.StartDate,
+			EndTime:   endOfDay(query.EndDate).Add(24 * time.Hour),
+		},
+		Pagination: domain.Pagination{Limit: maxQueryLimit},
 	}
 
 	var records []domain.AttendanceRecord
@@ -455,14 +440,17 @@ func (s *Service) listDailyAttendanceRecords(ctx context.Context, query domain.D
 	return records, nil
 }
 
-func (s *Service) applyMonthlyAttendanceResults(ctx context.Context, dailies []domain.DailyAttendance, startDate time.Time, endDate time.Time) error {
+func (s *Service) applyMonthlyAttendanceResults(ctx context.Context, dailies []domain.DailyAttendance, query domain.DailyAttendanceQuery) error {
 	if len(dailies) == 0 {
 		return nil
 	}
 
 	results, err := s.repository.ListMonthlyAttendanceResults(ctx, domain.MonthlyAttendanceResultQuery{
-		StartDate: startDate,
-		EndDate:   endDate,
+		AttendancePersonFilter: query.AttendancePersonFilter,
+		DateRangeFilter: domain.DateRangeFilter{
+			StartDate: query.StartDate,
+			EndDate:   query.EndDate,
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("service: list monthly attendance results: %w", err)
@@ -640,6 +628,9 @@ func buildDailyAttendance(query domain.DailyAttendanceQuery, records []domain.At
 			continue
 		}
 		if query.UserID != "" && userID != query.UserID {
+			continue
+		}
+		if query.UserName != "" && strings.TrimSpace(record.CardName) != query.UserName {
 			continue
 		}
 		if query.DeviceSN != "" && strings.TrimSpace(record.DeviceSN) != query.DeviceSN {
