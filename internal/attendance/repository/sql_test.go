@@ -300,6 +300,7 @@ func TestSQLRepositorySavesMonthlyAttendanceResult(t *testing.T) {
 		IsAbnormal:       false,
 		Corrected:        true,
 		CorrectionStatus: domain.AttendanceCorrectionStatusApplied,
+		CorrectionType:   domain.AttendanceCorrectionTypeLeave,
 		CorrectionReason: "manual correction",
 		CorrectedAt:      fixedTime(),
 		Exceptions: []domain.DailyAttendanceException{
@@ -327,7 +328,7 @@ func TestSQLRepositorySavesMonthlyAttendanceResult(t *testing.T) {
 	if !strings.Contains(executor.query, "ON DUPLICATE KEY UPDATE") {
 		t.Fatalf("query should upsert monthly result: %s", executor.query)
 	}
-	if len(executor.args) != 25 {
+	if len(executor.args) != 26 {
 		t.Fatalf("unexpected args length: %d", len(executor.args))
 	}
 	if executor.args[9] != "corrected" {
@@ -335,6 +336,9 @@ func TestSQLRepositorySavesMonthlyAttendanceResult(t *testing.T) {
 	}
 	if executor.args[10] != "missing_check_out" {
 		t.Fatalf("unexpected exceptions arg: %v", executor.args[10])
+	}
+	if executor.args[14] != "leave" {
+		t.Fatalf("unexpected correction type arg: %v", executor.args[14])
 	}
 }
 

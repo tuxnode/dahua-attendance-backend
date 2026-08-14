@@ -1128,10 +1128,8 @@ func attendanceCorrectionFromRequest(request attendancev1.CreateAttendanceCorrec
 	}
 
 	correctionType := domain.AttendanceCorrectionType(strings.TrimSpace(request.Type))
-	switch correctionType {
-	case domain.AttendanceCorrectionTypeCheckIn, domain.AttendanceCorrectionTypeCheckOut:
-	default:
-		return domain.AttendanceCorrection{}, fmt.Errorf("type must be one of %s,%s", domain.AttendanceCorrectionTypeCheckIn, domain.AttendanceCorrectionTypeCheckOut)
+	if !correctionType.IsValid() {
+		return domain.AttendanceCorrection{}, errors.New("type must be one of check_in,check_out,leave,business_trip")
 	}
 
 	return domain.AttendanceCorrection{
@@ -1526,6 +1524,7 @@ func toDailyAttendanceDTO(record domain.DailyAttendance) attendancev1.DailyAtten
 		IsAbnormal:        record.IsAbnormal(),
 		Corrected:         record.Corrected,
 		CorrectionStatus:  record.CorrectionStatus.String(),
+		CorrectionType:    record.CorrectionType.String(),
 		CorrectionReason:  record.CorrectionReason,
 		CorrectedAt:       timeToUnixSeconds(record.CorrectedAt),
 		WorkStartAt:       timeToUnixSeconds(record.WorkStartAt),

@@ -180,6 +180,7 @@ curl "http://127.0.0.1:8080/api/v1/attendance/daily?user_id=REDACTED_USER_ID&dat
       "is_abnormal": true,
       "corrected": false,
       "correction_status": "",
+      "correction_type": "",
       "correction_reason": "",
       "corrected_at": 0,
       "work_start_at": 1786323600,
@@ -212,6 +213,7 @@ curl "http://127.0.0.1:8080/api/v1/attendance/daily?user_id=REDACTED_USER_ID&dat
 | `is_abnormal` | bool | 是否异常；休息日不算异常。 |
 | `corrected` | bool | 是否已通过补卡修正。 |
 | `correction_status` | string | 补卡状态，例如 `applied`；未补卡时为空。 |
+| `correction_type` | string | 补卡场景，例如 `leave`、`business_trip`；传统打卡修正支持 `check_in`、`check_out`。 |
 | `correction_reason` | string | 补卡原因。 |
 | `corrected_at` | int | 补卡时间，Unix 秒；未补卡时为 `0`。 |
 | `work_start_at` | int | 应上班时间，Unix 秒。 |
@@ -295,7 +297,8 @@ curl "http://127.0.0.1:8080/api/v1/attendance/monthly?month=2026-08"
           "is_abnormal": false,
           "corrected": true,
           "correction_status": "applied",
-          "correction_reason": "manual correction",
+          "correction_type": "leave",
+          "correction_reason": "annual leave",
           "corrected_at": 1786356000,
           "work_start_at": 1786323600,
           "work_end_at": 1786356000,
@@ -466,7 +469,7 @@ curl "http://127.0.0.1:8080/api/v1/attendance/exceptions?start_date=2026-08-01&e
 
 ### `POST /api/v1/attendance/corrections`
 
-接收补卡请求。服务会保留原始设备打卡记录不变，新增补卡记录，并把对应用户、对应日期的月报按天结果写入 `monthly_attendance_results`，标记为已补卡且非异常。后续日报、月报、异常列表查询会读取该修正状态。
+接收补卡请求。服务会保留原始设备打卡记录不变，新增补卡记录，并把对应用户、对应日期的月报按天结果写入 `monthly_attendance_results`，标记为已补卡且非异常。`type` 用于区分补卡场景，支持请假、出差以及传统的上下班打卡修正。后续日报、月报、异常列表查询会读取该修正状态和类型。
 
 请求参数：
 
@@ -475,8 +478,8 @@ curl "http://127.0.0.1:8080/api/v1/attendance/exceptions?start_date=2026-08-01&e
 | `user_id` | 是 | string | 用户 ID。 |
 | `device_sn` | 否 | string | 设备 SN；为空时表示不限定设备。 |
 | `date` | 是 | `YYYY-MM-DD` | 需要补卡的考勤业务日期。 |
-| `type` | 是 | string | 补卡类型，支持 `check_in`、`check_out`。 |
-| `corrected_at` | 是 | Unix 秒 | 补卡时间。 |
+| `type` | 是 | string | 补卡场景，支持 `leave`、`business_trip`、`check_in`、`check_out`。 |
+| `corrected_at` | 是 | Unix 秒 | 补卡或审批处理时间。 |
 | `reason` | 否 | string | 补卡原因。 |
 
 请求示例：
@@ -488,9 +491,9 @@ curl -X POST "http://127.0.0.1:8080/api/v1/attendance/corrections" \
     "user_id": "REDACTED_USER_ID",
     "device_sn": "REDACTED_DEVICE_SN",
     "date": "2026-08-10",
-    "type": "check_out",
+    "type": "leave",
     "corrected_at": 1786356000,
-    "reason": "manual correction"
+    "reason": "annual leave"
   }'
 ```
 
@@ -503,9 +506,9 @@ curl -X POST "http://127.0.0.1:8080/api/v1/attendance/corrections" \
     "user_id": "REDACTED_USER_ID",
     "device_sn": "REDACTED_DEVICE_SN",
     "date": "2026-08-10",
-    "type": "check_out",
+    "type": "leave",
     "corrected_at": 1786356000,
-    "reason": "manual correction",
+    "reason": "annual leave",
     "status": "applied"
   }
 }
@@ -524,7 +527,8 @@ curl -X POST "http://127.0.0.1:8080/api/v1/attendance/corrections" \
       "is_abnormal": false,
       "corrected": true,
       "correction_status": "applied",
-      "correction_reason": "manual correction",
+      "correction_type": "leave",
+      "correction_reason": "annual leave",
       "corrected_at": 1786356000
     }
   ]

@@ -738,6 +738,9 @@ func TestSaveAttendanceCorrectionMarksMonthlyResultCorrected(t *testing.T) {
 	if !result.Corrected {
 		t.Fatal("expected result to be corrected")
 	}
+	if result.CorrectionType != domain.AttendanceCorrectionTypeCheckOut {
+		t.Fatalf("unexpected correction type: %s", result.CorrectionType)
+	}
 	if result.CorrectionReason != "forgot check out" {
 		t.Fatalf("unexpected correction reason: %s", result.CorrectionReason)
 	}
@@ -760,6 +763,48 @@ func TestSaveAttendanceCorrectionMarksMonthlyResultCorrected(t *testing.T) {
 	}
 	if !dailies[0].Corrected {
 		t.Fatalf("expected corrected daily: %+v", dailies[0])
+	}
+	if dailies[0].CorrectionType != domain.AttendanceCorrectionTypeCheckOut {
+		t.Fatalf("unexpected daily correction type: %s", dailies[0].CorrectionType)
+	}
+}
+
+func TestSaveAttendanceCorrectionSupportsLeaveAndBusinessTrip(t *testing.T) {
+	for _, correctionType := range []domain.AttendanceCorrectionType{
+		domain.AttendanceCorrectionTypeLeave,
+		domain.AttendanceCorrectionTypeBusinessTrip,
+	} {
+		t.Run(correctionType.String(), func(t *testing.T) {
+			date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+			repo := &fakeRepository{}
+			svc := service.New(
+				repo,
+				service.WithLogger(discardLogger()),
+				service.WithNow(func() time.Time { return date.Add(24 * time.Hour) }),
+				service.WithAttendanceRules(testAttendanceRules()),
+			)
+
+			_, err := svc.SaveAttendanceCorrection(context.Background(), domain.AttendanceCorrection{
+				UserID:      "REDACTED_USER_ID",
+				DeviceSN:    "REDACTED_DEVICE_SN",
+				Date:        date,
+				Type:        correctionType,
+				CorrectedAt: date.Add(12 * time.Hour),
+				Reason:      "attendance exception",
+			})
+			if err != nil {
+				t.Fatalf("save correction: %v", err)
+			}
+			if len(repo.monthlyResults) != 1 {
+				t.Fatalf("unexpected monthly results length: %d", len(repo.monthlyResults))
+			}
+			if repo.monthlyResults[0].CorrectionType != correctionType {
+				t.Fatalf("unexpected stored correction type: %s", repo.monthlyResults[0].CorrectionType)
+			}
+			if repo.monthlyResults[0].IsAbnormal {
+				t.Fatal("leave or business trip should not be abnormal")
+			}
+		})
 	}
 }
 

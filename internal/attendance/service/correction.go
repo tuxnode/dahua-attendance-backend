@@ -56,9 +56,7 @@ func normalizeAttendanceCorrection(correction domain.AttendanceCorrection) (doma
 	if correction.CorrectedAt.IsZero() {
 		return domain.AttendanceCorrection{}, errors.New("service: attendance correction corrected_at cannot be empty")
 	}
-	switch correction.Type {
-	case domain.AttendanceCorrectionTypeCheckIn, domain.AttendanceCorrectionTypeCheckOut:
-	default:
+	if !correction.Type.IsValid() {
 		return domain.AttendanceCorrection{}, fmt.Errorf("service: unsupported attendance correction type %q", correction.Type)
 	}
 
@@ -106,6 +104,7 @@ func applyCorrectionToDailyAttendance(daily *domain.DailyAttendance, correction 
 	daily.IsAbnormalOverride = &normal
 	daily.Corrected = true
 	daily.CorrectionStatus = correction.Status
+	daily.CorrectionType = correction.Type
 	daily.CorrectionReason = correction.Reason
 	daily.CorrectedAt = correction.CorrectedAt
 	daily.Status = domain.DailyAttendanceStatusCorrected
@@ -136,6 +135,7 @@ func monthlyAttendanceResultFromDaily(daily domain.DailyAttendance, calculatedAt
 		IsAbnormal:         daily.IsAbnormal(),
 		Corrected:          daily.Corrected,
 		CorrectionStatus:   daily.CorrectionStatus,
+		CorrectionType:     daily.CorrectionType,
 		CorrectionReason:   daily.CorrectionReason,
 		CorrectedAt:        daily.CorrectedAt,
 		WorkStartAt:        daily.WorkStartAt,

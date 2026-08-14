@@ -61,12 +61,26 @@ type AttendanceExceptionQuery struct {
 type AttendanceCorrectionType string
 
 const (
-	AttendanceCorrectionTypeCheckIn  AttendanceCorrectionType = "check_in"
-	AttendanceCorrectionTypeCheckOut AttendanceCorrectionType = "check_out"
+	AttendanceCorrectionTypeCheckIn      AttendanceCorrectionType = "check_in"
+	AttendanceCorrectionTypeCheckOut     AttendanceCorrectionType = "check_out"
+	AttendanceCorrectionTypeLeave        AttendanceCorrectionType = "leave"
+	AttendanceCorrectionTypeBusinessTrip AttendanceCorrectionType = "business_trip"
 )
 
 func (t AttendanceCorrectionType) String() string {
 	return string(t)
+}
+
+func (t AttendanceCorrectionType) IsValid() bool {
+	switch t {
+	case AttendanceCorrectionTypeCheckIn,
+		AttendanceCorrectionTypeCheckOut,
+		AttendanceCorrectionTypeLeave,
+		AttendanceCorrectionTypeBusinessTrip:
+		return true
+	default:
+		return false
+	}
 }
 
 type AttendanceCorrectionStatus string
@@ -115,6 +129,7 @@ type MonthlyAttendanceDailyResult struct {
 	IsAbnormal         bool
 	Corrected          bool
 	CorrectionStatus   AttendanceCorrectionStatus
+	CorrectionType     AttendanceCorrectionType
 	CorrectionReason   string
 	CorrectedAt        time.Time
 	WorkStartAt        time.Time
@@ -142,6 +157,7 @@ type DailyAttendance struct {
 	IsAbnormalOverride *bool
 	Corrected          bool
 	CorrectionStatus   AttendanceCorrectionStatus
+	CorrectionType     AttendanceCorrectionType
 	CorrectionReason   string
 	CorrectedAt        time.Time
 	WorkStartAt        time.Time

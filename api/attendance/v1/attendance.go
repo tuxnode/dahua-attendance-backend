@@ -247,6 +247,7 @@ type DailyAttendanceDTO struct {
 	IsAbnormal        bool     `json:"is_abnormal"`
 	Corrected         bool     `json:"corrected"`
 	CorrectionStatus  string   `json:"correction_status"`
+	CorrectionType    string   `json:"correction_type"`
 	CorrectionReason  string   `json:"correction_reason"`
 	CorrectedAt       int64    `json:"corrected_at"`
 	WorkStartAt       int64    `json:"work_start_at"`

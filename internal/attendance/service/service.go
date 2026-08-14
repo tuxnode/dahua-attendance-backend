@@ -739,6 +739,7 @@ func applyMonthlyResultToDailyAttendance(daily *domain.DailyAttendance, result d
 	daily.IsAbnormalOverride = boolPtr(result.IsAbnormal)
 	daily.Corrected = result.Corrected
 	daily.CorrectionStatus = result.CorrectionStatus
+	daily.CorrectionType = result.CorrectionType
 	daily.CorrectionReason = result.CorrectionReason
 	daily.CorrectedAt = result.CorrectedAt
 	if daily.UserName == "" {

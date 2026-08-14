@@ -663,6 +663,7 @@ INSERT INTO monthly_attendance_results (
 	is_abnormal,
 	corrected,
 	correction_status,
+	correction_type,
 	correction_reason,
 	corrected_at,
 	work_start_at,
@@ -674,7 +675,7 @@ INSERT INTO monthly_attendance_results (
 	record_count,
 	snapshot_count,
 	calculated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE
 	attendance_month = VALUES(attendance_month),
 	user_name = VALUES(user_name),
@@ -687,6 +688,7 @@ ON DUPLICATE KEY UPDATE
 	is_abnormal = VALUES(is_abnormal),
 	corrected = VALUES(corrected),
 	correction_status = VALUES(correction_status),
+	correction_type = VALUES(correction_type),
 	correction_reason = VALUES(correction_reason),
 	corrected_at = VALUES(corrected_at),
 	work_start_at = VALUES(work_start_at),
@@ -717,6 +719,7 @@ ON DUPLICATE KEY UPDATE
 		result.IsAbnormal,
 		result.Corrected,
 		result.CorrectionStatus.String(),
+		result.CorrectionType.String(),
 		result.CorrectionReason,
 		nullableTime(result.CorrectedAt),
 		nullableTime(result.WorkStartAt),
@@ -783,6 +786,7 @@ SELECT
 	is_abnormal,
 	corrected,
 	correction_status,
+	correction_type,
 	correction_reason,
 	corrected_at,
 	work_start_at,
@@ -834,6 +838,7 @@ func scanMonthlyAttendanceResult(scanner attendanceRecordScanner) (domain.Monthl
 	var status string
 	var exceptions string
 	var correctionStatus string
+	var correctionType string
 	var correctedAt sql.NullTime
 	var workStartAt sql.NullTime
 	var workEndAt sql.NullTime
@@ -857,6 +862,7 @@ func scanMonthlyAttendanceResult(scanner attendanceRecordScanner) (domain.Monthl
 		&result.IsAbnormal,
 		&result.Corrected,
 		&correctionStatus,
+		&correctionType,
 		&result.CorrectionReason,
 		&correctedAt,
 		&workStartAt,
@@ -875,6 +881,7 @@ func scanMonthlyAttendanceResult(scanner attendanceRecordScanner) (domain.Monthl
 	result.Status = domain.DailyAttendanceStatus(status)
 	result.Exceptions = parseAttendanceExceptions(exceptions)
 	result.CorrectionStatus = domain.AttendanceCorrectionStatus(correctionStatus)
+	result.CorrectionType = domain.AttendanceCorrectionType(correctionType)
 	result.CorrectedAt = nullTimeValue(correctedAt)
 	result.WorkStartAt = nullTimeValue(workStartAt)
 	result.WorkEndAt = nullTimeValue(workEndAt)

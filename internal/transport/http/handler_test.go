@@ -841,6 +841,34 @@ func TestHandleCreateAttendanceCorrection(t *testing.T) {
 	}
 }
 
+func TestHandleCreateAttendanceCorrectionAcceptsScenarioTypes(t *testing.T) {
+	for _, correctionType := range []string{"leave", "business_trip"} {
+		t.Run(correctionType, func(t *testing.T) {
+			service := &fakeService{}
+			router := newTestRouter(service)
+			body := `{
+				"user_id": "REDACTED_USER_ID",
+				"date": "2026-08-10",
+				"type": "` + correctionType + `",
+				"corrected_at": 1786356000,
+				"reason": "attendance exception"
+			}`
+			request := httptest.NewRequest(http.MethodPost, transporthttp.AttendanceCorrectionsPath, strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+
+			router.ServeHTTP(response, request)
+
+			if response.Code != http.StatusOK {
+				t.Fatalf("unexpected status: %d, body: %s", response.Code, response.Body.String())
+			}
+			if service.savedCorrection.Type.String() != correctionType {
+				t.Fatalf("unexpected correction type: %s", service.savedCorrection.Type)
+			}
+		})
+	}
+}
+
 func TestHandleCreateAttendanceCorrectionRejectsInvalidType(t *testing.T) {
 	router := newTestRouter(&fakeService{})
 
