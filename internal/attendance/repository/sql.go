@@ -18,7 +18,7 @@ type SQLExecutor interface {
 
 func (r *SQLRepository) GetAttendanceSettings(ctx context.Context) (domain.AttendanceSettings, error) {
 	const query = `
-SELECT timezone, default_shift_id, weekend_days
+SELECT timezone, default_shift_id, weekend_days, settlement_day
 FROM attendance_settings
 WHERE id = 1`
 
@@ -34,7 +34,7 @@ WHERE id = 1`
 
 	var settings domain.AttendanceSettings
 	var weekendDays string
-	if err := rows.Scan(&settings.Timezone, &settings.DefaultShiftID, &weekendDays); err != nil {
+	if err := rows.Scan(&settings.Timezone, &settings.DefaultShiftID, &weekendDays, &settings.SettlementDay); err != nil {
 		return domain.AttendanceSettings{}, fmt.Errorf("repository: scan attendance settings: %w", err)
 	}
 	if err := rows.Err(); err != nil {
@@ -51,12 +51,14 @@ INSERT INTO attendance_settings (
 	id,
 	timezone,
 	default_shift_id,
-	weekend_days
-) VALUES (1, ?, ?, ?)
+	weekend_days,
+	settlement_day
+) VALUES (1, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE
 	timezone = VALUES(timezone),
 	default_shift_id = VALUES(default_shift_id),
-	weekend_days = VALUES(weekend_days)`
+	weekend_days = VALUES(weekend_days),
+	settlement_day = VALUES(settlement_day)`
 
 	_, err := r.executor.ExecContext(
 		ctx,
@@ -64,6 +66,7 @@ ON DUPLICATE KEY UPDATE
 		settings.Timezone,
 		settings.DefaultShiftID,
 		formatWeekdayList(settings.WeekendDays),
+		settings.SettlementDay,
 	)
 	if err != nil {
 		return fmt.Errorf("repository: save attendance settings: %w", err)

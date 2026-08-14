@@ -87,7 +87,7 @@ connect_timeout = "5s"
 
 初始化数据库脚本会创建规则表，并写入默认设置：
 
-- `attendance_settings`：默认 `Asia/Shanghai`、默认班次 `day`、周六周日休息。
+- `attendance_settings`：默认 `Asia/Shanghai`、默认班次 `day`、周六周日休息，`settlement_day=1` 表示按自然月结算。
 - `attendance_shifts`：默认 `day` 班次，`09:00-18:00`。
 - `attendance_calendar_days`：节假日、调休工作日、额外休息日。
 - `attendance_schedules`：按日期排班，支持 `user_id`、`device_sn` 作用范围。

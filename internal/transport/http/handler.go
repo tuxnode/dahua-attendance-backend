@@ -1115,6 +1115,7 @@ func attendanceSettingsFromRequest(request attendancev1.SaveAttendanceSettingsRe
 		Timezone:       strings.TrimSpace(request.Timezone),
 		DefaultShiftID: strings.TrimSpace(request.DefaultShiftID),
 		WeekendDays:    weekendDays,
+		SettlementDay:  request.SettlementDay,
 	}, nil
 }
 
@@ -1342,6 +1343,7 @@ func toAttendanceSettingsDTO(settings domain.AttendanceSettings) attendancev1.At
 		Timezone:       settings.Timezone,
 		DefaultShiftID: settings.DefaultShiftID,
 		WeekendDays:    weekdaysToStrings(settings.WeekendDays),
+		SettlementDay:  settings.SettlementDay,
 	}
 }
 
@@ -1549,12 +1551,15 @@ func toMonthlyAttendanceDTOs(records []domain.MonthlyAttendance) []attendancev1.
 
 func toMonthlyAttendanceDTO(record domain.MonthlyAttendance) attendancev1.MonthlyAttendanceDTO {
 	return attendancev1.MonthlyAttendanceDTO{
-		Month:    record.Month.Format(queryMonthLayout),
-		UserID:   record.UserID,
-		UserName: record.UserName,
-		DeviceSN: record.DeviceSN,
-		Days:     toDailyAttendanceDTOs(record.Days),
-		Stats:    toAttendanceStatsDTO(record.Stats),
+		Month:         record.Month.Format(queryMonthLayout),
+		PeriodStart:   record.PeriodStart.Format(queryDateLayout),
+		PeriodEnd:     record.PeriodEnd.Format(queryDateLayout),
+		SettlementDay: record.SettlementDay,
+		UserID:        record.UserID,
+		UserName:      record.UserName,
+		DeviceSN:      record.DeviceSN,
+		Days:          toDailyAttendanceDTOs(record.Days),
+		Stats:         toAttendanceStatsDTO(record.Stats),
 	}
 }
 

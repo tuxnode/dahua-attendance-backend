@@ -51,6 +51,33 @@ func TestNewSQLRepositoryRejectsNilExecutor(t *testing.T) {
 	}
 }
 
+func TestSQLRepositorySavesAttendanceSettingsWithSettlementDay(t *testing.T) {
+	executor := &fakeExecutor{}
+	repo, err := repository.NewSQLRepository(executor)
+	if err != nil {
+		t.Fatalf("new repository: %v", err)
+	}
+
+	err = repo.SaveAttendanceSettings(context.Background(), domain.AttendanceSettings{
+		Timezone:       "Asia/Shanghai",
+		DefaultShiftID: "day",
+		WeekendDays:    []time.Weekday{time.Saturday, time.Sunday},
+		SettlementDay:  20,
+	})
+	if err != nil {
+		t.Fatalf("save attendance settings: %v", err)
+	}
+	if !strings.Contains(executor.query, "settlement_day") {
+		t.Fatalf("query should contain settlement_day: %s", executor.query)
+	}
+	if len(executor.args) != 4 {
+		t.Fatalf("unexpected args length: %d", len(executor.args))
+	}
+	if executor.args[3] != 20 {
+		t.Fatalf("unexpected settlement day arg: %v", executor.args[3])
+	}
+}
+
 func TestSQLRepositorySavesAttendanceRecord(t *testing.T) {
 	executor := &fakeExecutor{}
 	repo, err := repository.NewSQLRepository(executor)

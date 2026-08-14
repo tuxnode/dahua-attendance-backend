@@ -262,7 +262,7 @@ curl "http://127.0.0.1:8080/api/v1/attendance/daily?user_id=REDACTED_USER_ID&dat
 | `user_id` | 否 | string | 用户 ID。 |
 | `user_name` | 否 | string | 用户姓名，按精确匹配过滤。 |
 | `device_sn` | 否 | string | 设备 SN。 |
-| `month` | 否 | `YYYY-MM` | 查询月份；为空时使用当前月份。 |
+| `month` | 否 | `YYYY-MM` | 查询结算月；为空时使用当前月份。结算周期由设置中的 `settlement_day` 决定。 |
 | `limit` | 否 | int | 分页大小。 |
 | `offset` | 否 | int | 分页偏移。 |
 
@@ -279,6 +279,9 @@ curl "http://127.0.0.1:8080/api/v1/attendance/monthly?month=2026-08"
   "records": [
     {
       "month": "2026-08",
+      "period_start": "2026-07-21",
+      "period_end": "2026-08-20",
+      "settlement_day": 20,
       "user_id": "REDACTED_USER_ID",
       "user_name": "REDACTED_NAME",
       "device_sn": "REDACTED_DEVICE_SN",
@@ -332,7 +335,7 @@ curl "http://127.0.0.1:8080/api/v1/attendance/monthly?month=2026-08"
 }
 ```
 
-说明：`days` 为该用户当月按天的考勤明细，字段和日报接口一致，用于前端按天展示当天是否异常、是否已补卡。月报统计会基于这些按天结果聚合。
+说明：`days` 为该用户结算周期内按天的考勤明细，字段和日报接口一致，用于前端按天展示当天是否异常、是否已补卡。`period_start` 和 `period_end` 为该月报实际覆盖日期；例如 `settlement_day=20` 时，`month=2026-08` 覆盖 `2026-07-21` 到 `2026-08-20`。月报统计会基于这些按天结果聚合。
 
 ## 查询考勤汇总
 
@@ -557,7 +560,8 @@ curl -X POST "http://127.0.0.1:8080/api/v1/attendance/corrections" \
   "settings": {
     "timezone": "Asia/Shanghai",
     "default_shift_id": "day",
-    "weekend_days": ["saturday", "sunday"]
+    "weekend_days": ["saturday", "sunday"],
+    "settlement_day": 20
   }
 }
 ```
@@ -570,9 +574,12 @@ curl -X POST "http://127.0.0.1:8080/api/v1/attendance/corrections" \
 {
   "timezone": "Asia/Shanghai",
   "default_shift_id": "day",
-  "weekend_days": ["saturday", "sunday"]
+  "weekend_days": ["saturday", "sunday"],
+  "settlement_day": 20
 }
 ```
+
+`settlement_day` 为月报结算日，取值范围 `1-28`。值为 `1` 时按自然月统计；值为 `20` 时，`YYYY-MM` 月报覆盖上月 21 日至本月 20 日。
 
 ### 班次
 
@@ -787,7 +794,8 @@ curl -X POST "http://127.0.0.1:8080/api/v1/attendance/corrections" \
 - `month` 必须使用 `YYYY-MM`。
 - `limit`、`offset` 必须为整数。
 - `corrected_at` 必须为正整数 Unix 秒。
-- 补卡 `type` 只支持 `check_in`、`check_out`。
+- `settlement_day` 必须在 `1-28` 之间。
+- 补卡 `type` 只支持 `leave`、`business_trip`、`check_in`、`check_out`。
 - `start_time`、`end_time` 班次时间必须使用 `HH:MM`。
 - `day_type` 只支持 `holiday`、`workday`、`rest_day`。
 - `weekday` 支持英文全称、三字母缩写或 `0` 到 `6`。

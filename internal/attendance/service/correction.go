@@ -92,7 +92,12 @@ func (s *Service) buildCorrectedMonthlyAttendanceResult(ctx context.Context, cor
 	}
 
 	applyCorrectionToDailyAttendance(&daily, correction)
-	return monthlyAttendanceResultFromDaily(daily, s.now()), nil
+	settings, err := s.loadAttendanceSettings(ctx)
+	if err != nil {
+		return domain.MonthlyAttendanceDailyResult{}, err
+	}
+
+	return monthlyAttendanceResultFromDaily(daily, s.now(), settings.SettlementDay), nil
 }
 
 func applyCorrectionToDailyAttendance(daily *domain.DailyAttendance, correction domain.AttendanceCorrection) {
@@ -119,9 +124,9 @@ func applyCorrectionToDailyAttendance(daily *domain.DailyAttendance, correction 
 	}
 }
 
-func monthlyAttendanceResultFromDaily(daily domain.DailyAttendance, calculatedAt time.Time) domain.MonthlyAttendanceDailyResult {
+func monthlyAttendanceResultFromDaily(daily domain.DailyAttendance, calculatedAt time.Time, settlementDay int) domain.MonthlyAttendanceDailyResult {
 	return domain.MonthlyAttendanceDailyResult{
-		Month:              firstDayOfMonth(daily.Date),
+		Month:              settlementMonthForDate(daily.Date, settlementDay),
 		Date:               startOfDay(daily.Date),
 		UserID:             daily.UserID,
 		UserName:           daily.UserName,

@@ -628,10 +628,13 @@ func TestHandleMonthlyAttendanceReturnsRecords(t *testing.T) {
 	service := &fakeService{
 		monthlyRecords: []domain.MonthlyAttendance{
 			{
-				Month:    month,
-				UserID:   "REDACTED_USER_ID",
-				UserName: "REDACTED_NAME",
-				DeviceSN: "REDACTED_DEVICE_SN",
+				Month:         month,
+				PeriodStart:   time.Date(2026, 7, 21, 0, 0, 0, 0, time.Local),
+				PeriodEnd:     time.Date(2026, 8, 20, 0, 0, 0, 0, time.Local),
+				SettlementDay: 20,
+				UserID:        "REDACTED_USER_ID",
+				UserName:      "REDACTED_NAME",
+				DeviceSN:      "REDACTED_DEVICE_SN",
 				Stats: domain.AttendanceStats{
 					TotalDays:               31,
 					NormalDays:              20,
@@ -674,6 +677,9 @@ func TestHandleMonthlyAttendanceReturnsRecords(t *testing.T) {
 	body := response.Body.String()
 	for _, expected := range []string{
 		`"month":"2026-08"`,
+		`"period_start":"2026-07-21"`,
+		`"period_end":"2026-08-20"`,
+		`"settlement_day":20`,
 		`"total_days":31`,
 		`"normal_days":20`,
 		`"abnormal_days":11`,
@@ -895,6 +901,7 @@ func TestHandleAttendanceSettingsReturnsSettings(t *testing.T) {
 			Timezone:       "Asia/Shanghai",
 			DefaultShiftID: "day",
 			WeekendDays:    []time.Weekday{time.Saturday, time.Sunday},
+			SettlementDay:  20,
 		},
 	}
 	router := newTestRouter(service)
@@ -916,6 +923,7 @@ func TestHandleAttendanceSettingsReturnsSettings(t *testing.T) {
 		`"timezone":"Asia/Shanghai"`,
 		`"default_shift_id":"day"`,
 		`"weekend_days":["saturday","sunday"]`,
+		`"settlement_day":20`,
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("response missing %s: %s", expected, body)
@@ -930,7 +938,8 @@ func TestHandleSaveAttendanceSettings(t *testing.T) {
 	body := `{
 		"timezone": "Asia/Shanghai",
 		"default_shift_id": "night",
-		"weekend_days": ["friday", "saturday"]
+		"weekend_days": ["friday", "saturday"],
+		"settlement_day": 20
 	}`
 	request := httptest.NewRequest(http.MethodPut, transporthttp.AttendanceSettingsPath, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -954,6 +963,9 @@ func TestHandleSaveAttendanceSettings(t *testing.T) {
 		service.savedSettings.WeekendDays[0] != time.Friday ||
 		service.savedSettings.WeekendDays[1] != time.Saturday {
 		t.Fatalf("unexpected weekend days: %+v", service.savedSettings.WeekendDays)
+	}
+	if service.savedSettings.SettlementDay != 20 {
+		t.Fatalf("unexpected settlement day: %d", service.savedSettings.SettlementDay)
 	}
 }
 

@@ -6,6 +6,7 @@ type AttendanceSettings struct {
 	Timezone       string
 	DefaultShiftID string
 	WeekendDays    []time.Weekday
+	SettlementDay  int
 }
 
 type AttendanceShiftQuery struct {

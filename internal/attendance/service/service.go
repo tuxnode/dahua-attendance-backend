@@ -21,6 +21,9 @@ const (
 	maxQueryLimit     = 500
 
 	maxDailyDateRangeDays = 31
+
+	defaultSettlementDay = 1
+	maxSettlementDay     = 28
 )
 
 type Service struct {
@@ -128,11 +131,16 @@ func (s *Service) ListMonthlyAttendance(ctx context.Context, query domain.Monthl
 	}
 
 	normalized := normalizeMonthlyAttendanceQuery(query, s.now())
+	settings, err := s.loadAttendanceSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	period := monthlyAttendancePeriod(normalized.Month, settings.SettlementDay)
 	dailies, err := s.listDailyAttendance(ctx, domain.DailyAttendanceQuery{
 		AttendancePersonFilter: normalized.AttendancePersonFilter,
 		DateRangeFilter: domain.DateRangeFilter{
-			StartDate: firstDayOfMonth(normalized.Month),
-			EndDate:   lastDayOfMonth(normalized.Month),
+			StartDate: period.StartDate,
+			EndDate:   period.EndDate,
 		},
 		Pagination: domain.Pagination{Limit: maxQueryLimit},
 	})
@@ -140,7 +148,7 @@ func (s *Service) ListMonthlyAttendance(ctx context.Context, query domain.Monthl
 		return nil, err
 	}
 
-	records := buildMonthlyAttendance(normalized, dailies)
+	records := buildMonthlyAttendance(normalized, dailies, period)
 	return paginateMonthlyAttendance(records, normalized.Limit, normalized.Offset), nil
 }
 
@@ -327,6 +335,18 @@ func (s *Service) listDailyAttendance(ctx context.Context, query domain.DailyAtt
 	return dailies, nil
 }
 
+func (s *Service) loadAttendanceSettings(ctx context.Context) (domain.AttendanceSettings, error) {
+	settings, err := s.repository.GetAttendanceSettings(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return normalizeAttendanceSettings(domain.AttendanceSettings{}), nil
+		}
+		return domain.AttendanceSettings{}, fmt.Errorf("service: get attendance settings: %w", err)
+	}
+
+	return normalizeAttendanceSettings(settings), nil
+}
+
 func (s *Service) loadAttendanceRules(ctx context.Context, startDate time.Time, endDate time.Time) (domain.AttendanceRules, error) {
 	settings, err := s.repository.GetAttendanceSettings(ctx)
 	if err != nil {
@@ -335,6 +355,7 @@ func (s *Service) loadAttendanceRules(ctx context.Context, startDate time.Time, 
 		}
 		return domain.AttendanceRules{}, fmt.Errorf("service: get attendance settings: %w", err)
 	}
+	settings = normalizeAttendanceSettings(settings)
 
 	location, err := time.LoadLocation(settings.Timezone)
 	if err != nil {
@@ -567,12 +588,22 @@ func (s *Service) handleDoorStatus(ctx context.Context, envelope domain.EventEnv
 }
 
 type monthlyAttendanceAggregate struct {
-	month    time.Time
-	userID   string
-	userName string
-	deviceSN string
-	dailies  []domain.DailyAttendance
-	stats    domain.AttendanceStats
+	month         time.Time
+	periodStart   time.Time
+	periodEnd     time.Time
+	settlementDay int
+	userID        string
+	userName      string
+	deviceSN      string
+	dailies       []domain.DailyAttendance
+	stats         domain.AttendanceStats
+}
+
+type monthlyAttendancePeriodRange struct {
+	Month         time.Time
+	StartDate     time.Time
+	EndDate       time.Time
+	SettlementDay int
 }
 
 type dailyAttendanceResultKey struct {
@@ -671,7 +702,7 @@ func buildDailyAttendance(query domain.DailyAttendanceQuery, records []domain.At
 	return dailies
 }
 
-func buildMonthlyAttendance(query domain.MonthlyAttendanceQuery, dailies []domain.DailyAttendance) []domain.MonthlyAttendance {
+func buildMonthlyAttendance(query domain.MonthlyAttendanceQuery, dailies []domain.DailyAttendance, period monthlyAttendancePeriodRange) []domain.MonthlyAttendance {
 	aggregates := make(map[string]*monthlyAttendanceAggregate)
 
 	for _, daily := range dailies {
@@ -683,10 +714,13 @@ func buildMonthlyAttendance(query domain.MonthlyAttendanceQuery, dailies []domai
 		aggregate := aggregates[userID]
 		if aggregate == nil {
 			aggregate = &monthlyAttendanceAggregate{
-				month:    firstDayOfMonth(query.Month),
-				userID:   userID,
-				userName: daily.UserName,
-				deviceSN: daily.DeviceSN,
+				month:         firstDayOfMonth(query.Month),
+				periodStart:   period.StartDate,
+				periodEnd:     period.EndDate,
+				settlementDay: period.SettlementDay,
+				userID:        userID,
+				userName:      daily.UserName,
+				deviceSN:      daily.DeviceSN,
 			}
 			aggregates[userID] = aggregate
 		}
@@ -704,12 +738,15 @@ func buildMonthlyAttendance(query domain.MonthlyAttendanceQuery, dailies []domai
 	records := make([]domain.MonthlyAttendance, 0, len(aggregates))
 	for _, aggregate := range aggregates {
 		records = append(records, domain.MonthlyAttendance{
-			Month:    aggregate.month,
-			UserID:   aggregate.userID,
-			UserName: aggregate.userName,
-			DeviceSN: aggregate.deviceSN,
-			Days:     sortedMonthlyDailies(aggregate.dailies),
-			Stats:    aggregate.stats,
+			Month:         aggregate.month,
+			PeriodStart:   aggregate.periodStart,
+			PeriodEnd:     aggregate.periodEnd,
+			SettlementDay: aggregate.settlementDay,
+			UserID:        aggregate.userID,
+			UserName:      aggregate.userName,
+			DeviceSN:      aggregate.deviceSN,
+			Days:          sortedMonthlyDailies(aggregate.dailies),
+			Stats:         aggregate.stats,
 		})
 	}
 
@@ -1250,6 +1287,53 @@ func firstDayOfMonth(value time.Time) time.Time {
 
 func lastDayOfMonth(value time.Time) time.Time {
 	return firstDayOfMonth(value).AddDate(0, 1, -1)
+}
+
+func monthlyAttendancePeriod(month time.Time, settlementDay int) monthlyAttendancePeriodRange {
+	month = firstDayOfMonth(month)
+	settlementDay = normalizeSettlementDayValue(settlementDay)
+	if month.IsZero() {
+		return monthlyAttendancePeriodRange{SettlementDay: settlementDay}
+	}
+	if settlementDay == defaultSettlementDay {
+		return monthlyAttendancePeriodRange{
+			Month:         month,
+			StartDate:     month,
+			EndDate:       lastDayOfMonth(month),
+			SettlementDay: settlementDay,
+		}
+	}
+
+	endDate := time.Date(month.Year(), month.Month(), settlementDay, 0, 0, 0, 0, month.Location())
+	startDate := endDate.AddDate(0, -1, 1)
+
+	return monthlyAttendancePeriodRange{
+		Month:         month,
+		StartDate:     startDate,
+		EndDate:       endDate,
+		SettlementDay: settlementDay,
+	}
+}
+
+func settlementMonthForDate(date time.Time, settlementDay int) time.Time {
+	date = startOfDay(date)
+	settlementDay = normalizeSettlementDayValue(settlementDay)
+	if date.IsZero() {
+		return time.Time{}
+	}
+	if settlementDay == defaultSettlementDay || date.Day() <= settlementDay {
+		return firstDayOfMonth(date)
+	}
+
+	return firstDayOfMonth(date).AddDate(0, 1, 0)
+}
+
+func normalizeSettlementDayValue(settlementDay int) int {
+	if settlementDay < defaultSettlementDay || settlementDay > maxSettlementDay {
+		return defaultSettlementDay
+	}
+
+	return settlementDay
 }
 
 func startOfDay(value time.Time) time.Time {

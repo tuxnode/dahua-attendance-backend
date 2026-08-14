@@ -93,6 +93,7 @@ type AttendanceSettingsDTO struct {
 	Timezone       string   `json:"timezone"`
 	DefaultShiftID string   `json:"default_shift_id"`
 	WeekendDays    []string `json:"weekend_days"`
+	SettlementDay  int      `json:"settlement_day"`
 }
 
 type GetAttendanceSettingsResponse struct {
@@ -103,6 +104,7 @@ type SaveAttendanceSettingsRequest struct {
 	Timezone       string   `json:"timezone"`
 	DefaultShiftID string   `json:"default_shift_id"`
 	WeekendDays    []string `json:"weekend_days"`
+	SettlementDay  int      `json:"settlement_day"`
 }
 
 type SaveAttendanceSettingsResponse struct {
@@ -261,12 +263,15 @@ type DailyAttendanceDTO struct {
 }
 
 type MonthlyAttendanceDTO struct {
-	Month    string               `json:"month"`
-	UserID   string               `json:"user_id"`
-	UserName string               `json:"user_name"`
-	DeviceSN string               `json:"device_sn"`
-	Days     []DailyAttendanceDTO `json:"days"`
-	Stats    AttendanceStatsDTO   `json:"stats"`
+	Month         string               `json:"month"`
+	PeriodStart   string               `json:"period_start"`
+	PeriodEnd     string               `json:"period_end"`
+	SettlementDay int                  `json:"settlement_day"`
+	UserID        string               `json:"user_id"`
+	UserName      string               `json:"user_name"`
+	DeviceSN      string               `json:"device_sn"`
+	Days          []DailyAttendanceDTO `json:"days"`
+	Stats         AttendanceStatsDTO   `json:"stats"`
 }
 
 type AttendanceSummaryDTO struct {

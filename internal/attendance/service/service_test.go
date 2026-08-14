@@ -61,7 +61,7 @@ func (r *fakeRepository) GetAttendanceSettings(_ context.Context) (domain.Attend
 	if r.settingsErr != nil {
 		return domain.AttendanceSettings{}, r.settingsErr
 	}
-	if r.settings.Timezone == "" && r.settings.DefaultShiftID == "" && len(r.settings.WeekendDays) == 0 {
+	if r.settings.Timezone == "" && r.settings.DefaultShiftID == "" && len(r.settings.WeekendDays) == 0 && r.settings.SettlementDay == 0 {
 		return domain.AttendanceSettings{}, sql.ErrNoRows
 	}
 	return r.settings, nil
@@ -293,6 +293,20 @@ func TestHandleDevicePayloadRejectsNilPayload(t *testing.T) {
 	err := svc.HandleDevicePayload(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestSaveAttendanceSettingsRejectsInvalidSettlementDay(t *testing.T) {
+	svc := service.New(&fakeRepository{}, service.WithLogger(discardLogger()))
+
+	_, err := svc.SaveAttendanceSettings(context.Background(), domain.AttendanceSettings{
+		Timezone:       "Asia/Shanghai",
+		DefaultShiftID: "day",
+		WeekendDays:    []time.Weekday{time.Saturday, time.Sunday},
+		SettlementDay:  29,
+	})
+	if err == nil {
+		t.Fatal("expected invalid settlement day error")
 	}
 }
 
@@ -808,6 +822,42 @@ func TestSaveAttendanceCorrectionSupportsLeaveAndBusinessTrip(t *testing.T) {
 	}
 }
 
+func TestSaveAttendanceCorrectionUsesSettlementMonth(t *testing.T) {
+	date := time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)
+	repo := &fakeRepository{
+		settings: domain.AttendanceSettings{
+			Timezone:       "UTC",
+			DefaultShiftID: "day",
+			WeekendDays:    []time.Weekday{time.Saturday, time.Sunday},
+			SettlementDay:  20,
+		},
+	}
+	svc := service.New(
+		repo,
+		service.WithLogger(discardLogger()),
+		service.WithNow(func() time.Time { return date.Add(24 * time.Hour) }),
+		service.WithAttendanceRules(testAttendanceRules()),
+	)
+
+	_, err := svc.SaveAttendanceCorrection(context.Background(), domain.AttendanceCorrection{
+		UserID:      "REDACTED_USER_ID",
+		DeviceSN:    "REDACTED_DEVICE_SN",
+		Date:        date,
+		Type:        domain.AttendanceCorrectionTypeLeave,
+		CorrectedAt: date.Add(12 * time.Hour),
+		Reason:      "annual leave",
+	})
+	if err != nil {
+		t.Fatalf("save correction: %v", err)
+	}
+	if len(repo.monthlyResults) != 1 {
+		t.Fatalf("unexpected monthly results length: %d", len(repo.monthlyResults))
+	}
+	if repo.monthlyResults[0].Month.Format("2006-01") != "2026-08" {
+		t.Fatalf("unexpected monthly result month: %s", repo.monthlyResults[0].Month)
+	}
+}
+
 func TestListDailyAttendanceUsesScheduledNightShiftAcrossDays(t *testing.T) {
 	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
 	rules := testAttendanceRules()
@@ -900,6 +950,48 @@ func TestListMonthlyAttendanceAggregatesUserStats(t *testing.T) {
 	}
 	if stats.TotalEarlyLeaveDuration != 30*time.Minute {
 		t.Fatalf("unexpected total early leave duration: %s", stats.TotalEarlyLeaveDuration)
+	}
+}
+
+func TestListMonthlyAttendanceUsesSettlementDay(t *testing.T) {
+	month := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	repo := &fakeRepository{
+		settings: domain.AttendanceSettings{
+			Timezone:       "UTC",
+			DefaultShiftID: "day",
+			WeekendDays:    []time.Weekday{time.Saturday, time.Sunday},
+			SettlementDay:  20,
+		},
+	}
+	svc := service.New(repo, service.WithLogger(discardLogger()))
+
+	records, err := svc.ListMonthlyAttendance(context.Background(), domain.MonthlyAttendanceQuery{
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+		Month:                  month,
+	})
+	if err != nil {
+		t.Fatalf("list monthly attendance: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("unexpected monthly records length: %d", len(records))
+	}
+
+	record := records[0]
+	if record.PeriodStart.Format("2006-01-02") != "2026-07-21" {
+		t.Fatalf("unexpected period start: %s", record.PeriodStart)
+	}
+	if record.PeriodEnd.Format("2006-01-02") != "2026-08-20" {
+		t.Fatalf("unexpected period end: %s", record.PeriodEnd)
+	}
+	if record.SettlementDay != 20 {
+		t.Fatalf("unexpected settlement day: %d", record.SettlementDay)
+	}
+	if len(record.Days) != 31 {
+		t.Fatalf("unexpected monthly days length: %d", len(record.Days))
+	}
+	if record.Days[0].Date.Format("2006-01-02") != "2026-07-21" ||
+		record.Days[len(record.Days)-1].Date.Format("2006-01-02") != "2026-08-20" {
+		t.Fatalf("unexpected monthly day range: first=%s last=%s", record.Days[0].Date, record.Days[len(record.Days)-1].Date)
 	}
 }
 

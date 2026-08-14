@@ -171,12 +171,15 @@ type DailyAttendance struct {
 }
 
 type MonthlyAttendance struct {
-	Month    time.Time
-	UserID   string
-	UserName string
-	DeviceSN string
-	Days     []DailyAttendance
-	Stats    AttendanceStats
+	Month         time.Time
+	PeriodStart   time.Time
+	PeriodEnd     time.Time
+	SettlementDay int
+	UserID        string
+	UserName      string
+	DeviceSN      string
+	Days          []DailyAttendance
+	Stats         AttendanceStats
 }
 
 type AttendanceSummary struct {

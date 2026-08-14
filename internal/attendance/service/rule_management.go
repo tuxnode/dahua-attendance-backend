@@ -32,6 +32,9 @@ func (s *Service) SaveAttendanceSettings(ctx context.Context, settings domain.At
 	if _, err := time.LoadLocation(normalized.Timezone); err != nil {
 		return domain.AttendanceSettings{}, fmt.Errorf("service: invalid attendance timezone %q: %w", normalized.Timezone, err)
 	}
+	if normalized.SettlementDay < 1 || normalized.SettlementDay > maxSettlementDay {
+		return domain.AttendanceSettings{}, fmt.Errorf("service: settlement_day must be between 1 and %d", maxSettlementDay)
+	}
 	if err := s.repository.SaveAttendanceSettings(ctx, normalized); err != nil {
 		return domain.AttendanceSettings{}, fmt.Errorf("service: save attendance settings: %w", err)
 	}
@@ -238,6 +241,9 @@ func normalizeAttendanceSettings(settings domain.AttendanceSettings) domain.Atte
 	}
 	if len(settings.WeekendDays) == 0 {
 		settings.WeekendDays = []time.Weekday{time.Saturday, time.Sunday}
+	}
+	if settings.SettlementDay == 0 {
+		settings.SettlementDay = defaultSettlementDay
 	}
 
 	return settings

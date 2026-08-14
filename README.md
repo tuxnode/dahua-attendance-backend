@@ -10,7 +10,7 @@
 
 - 设备 HTTP 上报接入：支持 JSON、`multipart/x-mixed-replace`、`multipart/form-data` 和 `deflate`。
 - 事件入库：`AccessControl` 写入 `attendance_records`，`DoorStatus` 写入 `door_status_records`。
-- 考勤统计：支持日报、月报、汇总、异常列表，月报返回按天明细用于展示当天是否异常，也支持按姓名查询。
+- 考勤统计：支持日报、月报、汇总、异常列表，月报支持配置结算日并返回按天明细，也支持按姓名查询。
 - 补卡修正：支持请假、出差和上下班打卡修正，保留原始设备记录不变，将补卡后的日期标记为已修正且非异常。
 - 考勤规则：支持业务时区、上下班时间、周末/节假日、工作日覆盖、弹性打卡、多班次和排班，规则通过 Web 接口写入数据库。
 - 服务注册：可选接入 Nacos Go SDK。
@@ -31,10 +31,11 @@
 mysql -h 127.0.0.1 -u root -p dahua_attendance < database/schema.mysql.sql
 ```
 
-已有数据库需要执行一次迁移：
+已有数据库需要按顺序执行迁移：
 
 ```bash
 mysql -h 127.0.0.1 -u root -p dahua_attendance < database/migrations/20260814_add_monthly_attendance_result_correction_type.sql
+mysql -h 127.0.0.1 -u root -p dahua_attendance < database/migrations/20260814_add_attendance_settlement_day.sql
 ```
 
 启动服务：

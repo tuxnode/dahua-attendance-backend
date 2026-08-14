@@ -52,11 +52,12 @@ CREATE TABLE IF NOT EXISTS attendance_settings (
     timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Shanghai',
     default_shift_id VARCHAR(64) NOT NULL DEFAULT 'day',
     weekend_days VARCHAR(64) NOT NULL DEFAULT 'saturday,sunday',
+    settlement_day TINYINT UNSIGNED NOT NULL DEFAULT 1,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO attendance_settings (id, timezone, default_shift_id, weekend_days)
-VALUES (1, 'Asia/Shanghai', 'day', 'saturday,sunday')
+INSERT INTO attendance_settings (id, timezone, default_shift_id, weekend_days, settlement_day)
+VALUES (1, 'Asia/Shanghai', 'day', 'saturday,sunday', 1)
 ON DUPLICATE KEY UPDATE id = id;
 
 CREATE TABLE IF NOT EXISTS attendance_shifts (
