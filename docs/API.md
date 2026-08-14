@@ -142,6 +142,8 @@ curl "http://127.0.0.1:8080/api/v1/attendance/records?user_id=REDACTED_USER_ID&s
 
 按考勤规则生成日报。日报会基于数据库中的时区、班次、周末、节假日、工作日覆盖和排班计算。
 
+当前采用 `entry_only` 考勤模型：只使用可识别身份的进门 `Entry` 记录判断出勤和迟到；出门 `Exit` 记录仅在能匹配人员时作为展示字段保留，不参与早退、缺少下班打卡等异常判断。
+
 查询参数：
 
 | 参数 | 必填 | 格式 | 说明 |
@@ -219,9 +221,9 @@ curl "http://127.0.0.1:8080/api/v1/attendance/daily?user_id=REDACTED_USER_ID&dat
 | `work_start_at` | int | 应上班时间，Unix 秒。 |
 | `work_end_at` | int | 应下班时间，Unix 秒。 |
 | `first_entry_at` | int | 当日首次入场时间，Unix 秒；无记录时为 `0`。 |
-| `last_exit_at` | int | 当日最后出场时间，Unix 秒；无记录时为 `0`。 |
+| `last_exit_at` | int | 当日最后出场时间，Unix 秒；无记录时为 `0`。当前 `entry_only` 模式下仅展示，不参与异常判断。 |
 | `late_seconds` | int | 迟到秒数。 |
-| `early_leave_seconds` | int | 早退秒数。 |
+| `early_leave_seconds` | int | 早退秒数；当前 `entry_only` 模式下为 `0`。 |
 | `record_count` | int | 当日匹配到的通行记录数量。 |
 | `snapshot_count` | int | 当日抓拍图片数量。 |
 
@@ -232,10 +234,10 @@ curl "http://127.0.0.1:8080/api/v1/attendance/daily?user_id=REDACTED_USER_ID&dat
 | `normal` | 正常。 |
 | `corrected` | 已补卡修正，按非异常处理。 |
 | `late` | 迟到。 |
-| `early_leave` | 早退。 |
-| `late_and_early_leave` | 迟到且早退。 |
-| `missing_check_in` | 缺少上班打卡。 |
-| `missing_check_out` | 缺少下班打卡。 |
+| `early_leave` | 早退；当前 `entry_only` 模式不会生成。 |
+| `late_and_early_leave` | 迟到且早退；当前 `entry_only` 模式不会生成。 |
+| `missing_check_in` | 缺少上班打卡；当前 `entry_only` 模式不会生成，缺少进门记录会判为 `absent`。 |
+| `missing_check_out` | 缺少下班打卡；当前 `entry_only` 模式不会生成。 |
 | `absent` | 缺勤。 |
 | `rest_day` | 休息日。 |
 
@@ -244,9 +246,9 @@ curl "http://127.0.0.1:8080/api/v1/attendance/daily?user_id=REDACTED_USER_ID&dat
 | 异常 | 说明 |
 | --- | --- |
 | `late` | 迟到。 |
-| `early_leave` | 早退。 |
-| `missing_check_in` | 缺少上班打卡。 |
-| `missing_check_out` | 缺少下班打卡。 |
+| `early_leave` | 早退；当前 `entry_only` 模式不会生成。 |
+| `missing_check_in` | 缺少上班打卡；当前 `entry_only` 模式不会生成。 |
+| `missing_check_out` | 缺少下班打卡；当前 `entry_only` 模式不会生成。 |
 | `absent` | 缺勤。 |
 
 ## 查询考勤月报
@@ -318,17 +320,17 @@ curl "http://127.0.0.1:8080/api/v1/attendance/monthly?month=2026-08"
         "work_days": 21,
         "rest_days": 10,
         "normal_days": 18,
-        "abnormal_days": 3,
+        "abnormal_days": 1,
         "late_days": 1,
-        "early_leave_days": 1,
+        "early_leave_days": 0,
         "late_and_early_leave_days": 0,
         "missing_check_in_days": 0,
-        "missing_check_out_days": 1,
+        "missing_check_out_days": 0,
         "absent_days": 0,
         "record_count": 42,
         "snapshot_count": 20,
         "total_late_seconds": 300,
-        "total_early_leave_seconds": 600
+        "total_early_leave_seconds": 0
       }
     }
   ]
@@ -373,17 +375,17 @@ curl "http://127.0.0.1:8080/api/v1/attendance/summary?start_date=2026-08-01&end_
       "work_days": 252,
       "rest_days": 120,
       "normal_days": 230,
-      "abnormal_days": 22,
+      "abnormal_days": 10,
       "late_days": 8,
-      "early_leave_days": 4,
-      "late_and_early_leave_days": 1,
-      "missing_check_in_days": 3,
-      "missing_check_out_days": 6,
+      "early_leave_days": 0,
+      "late_and_early_leave_days": 0,
+      "missing_check_in_days": 0,
+      "missing_check_out_days": 0,
       "absent_days": 2,
       "record_count": 504,
       "snapshot_count": 240,
       "total_late_seconds": 3600,
-      "total_early_leave_seconds": 2400
+      "total_early_leave_seconds": 0
     }
   }
 }
@@ -399,15 +401,15 @@ curl "http://127.0.0.1:8080/api/v1/attendance/summary?start_date=2026-08-01&end_
 | `normal_days` | int | 正常天数。 |
 | `abnormal_days` | int | 异常天数，不包含休息日。 |
 | `late_days` | int | 迟到天数。 |
-| `early_leave_days` | int | 早退天数。 |
-| `late_and_early_leave_days` | int | 迟到且早退天数。 |
-| `missing_check_in_days` | int | 缺少上班打卡天数。 |
-| `missing_check_out_days` | int | 缺少下班打卡天数。 |
+| `early_leave_days` | int | 早退天数；当前 `entry_only` 模式下为 `0`。 |
+| `late_and_early_leave_days` | int | 迟到且早退天数；当前 `entry_only` 模式下为 `0`。 |
+| `missing_check_in_days` | int | 缺少上班打卡天数；当前 `entry_only` 模式下为 `0`。 |
+| `missing_check_out_days` | int | 缺少下班打卡天数；当前 `entry_only` 模式下为 `0`。 |
 | `absent_days` | int | 缺勤天数。 |
 | `record_count` | int | 通行记录数量。 |
 | `snapshot_count` | int | 抓拍图片数量。 |
 | `total_late_seconds` | int | 总迟到秒数。 |
-| `total_early_leave_seconds` | int | 总早退秒数。 |
+| `total_early_leave_seconds` | int | 总早退秒数；当前 `entry_only` 模式下为 `0`。 |
 
 ## 查询考勤异常列表
 
@@ -448,8 +450,8 @@ curl "http://127.0.0.1:8080/api/v1/attendance/exceptions?start_date=2026-08-01&e
       "shift_name": "Day Shift",
       "is_workday": true,
       "non_workday_reason": "",
-      "status": "missing_check_out",
-      "exceptions": ["missing_check_out"],
+      "status": "late",
+      "exceptions": ["late"],
       "is_abnormal": true,
       "corrected": false,
       "correction_status": "",
@@ -457,9 +459,9 @@ curl "http://127.0.0.1:8080/api/v1/attendance/exceptions?start_date=2026-08-01&e
       "corrected_at": 0,
       "work_start_at": 1786323600,
       "work_end_at": 1786356000,
-      "first_entry_at": 1786323300,
+      "first_entry_at": 1786324500,
       "last_exit_at": 0,
-      "late_seconds": 0,
+      "late_seconds": 900,
       "early_leave_seconds": 0,
       "record_count": 1,
       "snapshot_count": 1
@@ -637,7 +639,7 @@ curl -X POST "http://127.0.0.1:8080/api/v1/attendance/corrections" \
 
 删除班次。成功返回 `204`。
 
-迟到判断阈值为 `start_time + late_grace_minutes + flexible_minutes`，早退判断阈值为 `end_time - early_leave_grace_minutes`。`end_time` 小于等于 `start_time` 时按跨日班次处理。
+当前 `entry_only` 模式下，迟到判断阈值为 `start_time + late_grace_minutes + flexible_minutes`，`end_time` 仅用于展示应下班时间和跨日班次归属，不参与早退判断。`end_time` 小于等于 `start_time` 时按跨日班次处理。
 
 ### 日历覆盖
 

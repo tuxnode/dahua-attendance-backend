@@ -1189,50 +1189,24 @@ func evaluateDailyAttendanceStatus(aggregate dailyAttendanceAggregate) (
 		return domain.DailyAttendanceStatusRestDay, nil, 0, 0
 	}
 
-	if aggregate.firstEntryAt.IsZero() && aggregate.lastExitAt.IsZero() {
+	if aggregate.firstEntryAt.IsZero() {
 		return domain.DailyAttendanceStatusAbsent,
 			[]domain.DailyAttendanceException{domain.DailyAttendanceExceptionAbsent},
 			0,
 			0
 	}
-	if aggregate.firstEntryAt.IsZero() {
-		return domain.DailyAttendanceStatusMissingCheckIn,
-			[]domain.DailyAttendanceException{domain.DailyAttendanceExceptionMissingCheckIn},
-			0,
-			0
-	}
-	if aggregate.lastExitAt.IsZero() {
-		return domain.DailyAttendanceStatusMissingCheckOut,
-			[]domain.DailyAttendanceException{domain.DailyAttendanceExceptionMissingCheckOut},
-			0,
-			0
-	}
 
-	exceptions := make([]domain.DailyAttendanceException, 0, 2)
 	lateDuration := time.Duration(0)
 	latestStart := aggregate.workStartAt.Add(aggregate.lateGrace).Add(aggregate.flexible)
 	if aggregate.firstEntryAt.After(latestStart) {
 		lateDuration = aggregate.firstEntryAt.Sub(aggregate.workStartAt)
-		exceptions = append(exceptions, domain.DailyAttendanceExceptionLate)
+		return domain.DailyAttendanceStatusLate,
+			[]domain.DailyAttendanceException{domain.DailyAttendanceExceptionLate},
+			lateDuration,
+			0
 	}
 
-	earlyLeaveDuration := time.Duration(0)
-	earliestEnd := aggregate.workEndAt.Add(-aggregate.earlyLeaveGrace)
-	if aggregate.lastExitAt.Before(earliestEnd) {
-		earlyLeaveDuration = aggregate.workEndAt.Sub(aggregate.lastExitAt)
-		exceptions = append(exceptions, domain.DailyAttendanceExceptionEarlyLeave)
-	}
-
-	switch {
-	case lateDuration > 0 && earlyLeaveDuration > 0:
-		return domain.DailyAttendanceStatusLateAndEarlyLeave, exceptions, lateDuration, earlyLeaveDuration
-	case lateDuration > 0:
-		return domain.DailyAttendanceStatusLate, exceptions, lateDuration, earlyLeaveDuration
-	case earlyLeaveDuration > 0:
-		return domain.DailyAttendanceStatusEarlyLeave, exceptions, lateDuration, earlyLeaveDuration
-	default:
-		return domain.DailyAttendanceStatusNormal, nil, 0, 0
-	}
+	return domain.DailyAttendanceStatusNormal, nil, 0, 0
 }
 
 func paginateDailyAttendance(dailies []domain.DailyAttendance, limit int, offset int) []domain.DailyAttendance {

@@ -423,7 +423,7 @@ func TestListDailyAttendanceReturnsNormal(t *testing.T) {
 	}
 }
 
-func TestListDailyAttendanceReturnsLateAndEarlyLeave(t *testing.T) {
+func TestListDailyAttendanceReturnsLateAndIgnoresEarlyExit(t *testing.T) {
 	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
 	repo := &fakeRepository{
 		attendanceRecords: []domain.AttendanceRecord{
@@ -445,24 +445,24 @@ func TestListDailyAttendanceReturnsLateAndEarlyLeave(t *testing.T) {
 	}
 
 	daily := dailies[0]
-	if daily.Status != domain.DailyAttendanceStatusLateAndEarlyLeave {
+	if daily.Status != domain.DailyAttendanceStatusLate {
 		t.Fatalf("unexpected status: %s", daily.Status)
 	}
 	if daily.LateDuration != 10*time.Minute {
 		t.Fatalf("unexpected late duration: %s", daily.LateDuration)
 	}
-	if daily.EarlyLeaveDuration != 30*time.Minute {
+	if daily.EarlyLeaveDuration != 0 {
 		t.Fatalf("unexpected early leave duration: %s", daily.EarlyLeaveDuration)
 	}
 	if !daily.HasException(domain.DailyAttendanceExceptionLate) {
 		t.Fatal("expected late exception")
 	}
-	if !daily.HasException(domain.DailyAttendanceExceptionEarlyLeave) {
-		t.Fatal("expected early leave exception")
+	if daily.HasException(domain.DailyAttendanceExceptionEarlyLeave) {
+		t.Fatal("did not expect early leave exception")
 	}
 }
 
-func TestListDailyAttendanceReturnsMissingCheckOut(t *testing.T) {
+func TestListDailyAttendanceReturnsNormalWithEntryOnly(t *testing.T) {
 	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
 	repo := &fakeRepository{
 		attendanceRecords: []domain.AttendanceRecord{
@@ -481,11 +481,41 @@ func TestListDailyAttendanceReturnsMissingCheckOut(t *testing.T) {
 	if len(dailies) != 1 {
 		t.Fatalf("unexpected daily attendance length: %d", len(dailies))
 	}
-	if dailies[0].Status != domain.DailyAttendanceStatusMissingCheckOut {
+	if dailies[0].Status != domain.DailyAttendanceStatusNormal {
 		t.Fatalf("unexpected status: %s", dailies[0].Status)
 	}
-	if !dailies[0].HasException(domain.DailyAttendanceExceptionMissingCheckOut) {
-		t.Fatal("expected missing check-out exception")
+	if dailies[0].HasException(domain.DailyAttendanceExceptionMissingCheckOut) {
+		t.Fatal("did not expect missing check-out exception")
+	}
+}
+
+func TestListDailyAttendanceReturnsAbsentWithoutEntry(t *testing.T) {
+	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+	repo := &fakeRepository{
+		attendanceRecords: []domain.AttendanceRecord{
+			dailyRecord(date.Add(18*time.Hour), domain.AccessDirectionExit),
+		},
+	}
+	svc := service.New(repo, service.WithLogger(discardLogger()))
+
+	dailies, err := svc.ListDailyAttendance(context.Background(), domain.DailyAttendanceQuery{
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+		DateRangeFilter:        domain.DateRangeFilter{StartDate: date, EndDate: date},
+	})
+	if err != nil {
+		t.Fatalf("list daily attendance: %v", err)
+	}
+	if len(dailies) != 1 {
+		t.Fatalf("unexpected daily attendance length: %d", len(dailies))
+	}
+	if dailies[0].Status != domain.DailyAttendanceStatusAbsent {
+		t.Fatalf("unexpected status: %s", dailies[0].Status)
+	}
+	if !dailies[0].HasException(domain.DailyAttendanceExceptionAbsent) {
+		t.Fatal("expected absent exception")
+	}
+	if dailies[0].LastExitAt.IsZero() {
+		t.Fatal("expected raw exit time to remain available")
 	}
 }
 
@@ -939,7 +969,7 @@ func TestListMonthlyAttendanceAggregatesUserStats(t *testing.T) {
 	if stats.AbnormalDays != 30 {
 		t.Fatalf("unexpected abnormal days: %d", stats.AbnormalDays)
 	}
-	if stats.LateDays != 1 || stats.EarlyLeaveDays != 1 || stats.LateAndEarlyLeaveDays != 1 {
+	if stats.LateDays != 1 || stats.EarlyLeaveDays != 0 || stats.LateAndEarlyLeaveDays != 0 {
 		t.Fatalf("unexpected exception stats: %+v", stats)
 	}
 	if stats.AbsentDays != 29 {
@@ -948,7 +978,7 @@ func TestListMonthlyAttendanceAggregatesUserStats(t *testing.T) {
 	if stats.TotalLateDuration != 10*time.Minute {
 		t.Fatalf("unexpected total late duration: %s", stats.TotalLateDuration)
 	}
-	if stats.TotalEarlyLeaveDuration != 30*time.Minute {
+	if stats.TotalEarlyLeaveDuration != 0 {
 		t.Fatalf("unexpected total early leave duration: %s", stats.TotalEarlyLeaveDuration)
 	}
 }
@@ -1084,7 +1114,6 @@ func TestListAttendanceExceptionsFiltersAndPaginates(t *testing.T) {
 			dailyRecord(date.Add(18*time.Hour+10*time.Minute), domain.AccessDirectionExit),
 			dailyRecord(date.AddDate(0, 0, 1).Add(9*time.Hour+10*time.Minute), domain.AccessDirectionEntry),
 			dailyRecord(date.AddDate(0, 0, 1).Add(18*time.Hour), domain.AccessDirectionExit),
-			dailyRecord(date.AddDate(0, 0, 2).Add(8*time.Hour+55*time.Minute), domain.AccessDirectionEntry),
 		},
 	}
 	svc := service.New(repo, service.WithLogger(discardLogger()))
