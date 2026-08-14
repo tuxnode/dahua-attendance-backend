@@ -262,7 +262,7 @@ curl "http://127.0.0.1:8080/api/v1/attendance/daily?user_id=REDACTED_USER_ID&dat
 | `user_id` | 否 | string | 用户 ID。 |
 | `user_name` | 否 | string | 用户姓名，按精确匹配过滤。 |
 | `device_sn` | 否 | string | 设备 SN。 |
-| `month` | 否 | `YYYY-MM` | 查询结算月；为空时使用当前月份。结算周期由设置中的 `settlement_day` 决定。 |
+| `month` | 否 | `YYYY-MM` | 查询结算月；为空时使用包含当前日期的结算周期。结算周期由设置中的 `settlement_day` 决定。 |
 | `limit` | 否 | int | 分页大小。 |
 | `offset` | 否 | int | 分页偏移。 |
 
@@ -335,7 +335,7 @@ curl "http://127.0.0.1:8080/api/v1/attendance/monthly?month=2026-08"
 }
 ```
 
-说明：`days` 为该用户结算周期内按天的考勤明细，字段和日报接口一致，用于前端按天展示当天是否异常、是否已补卡。`period_start` 和 `period_end` 为该月报实际覆盖日期；例如 `settlement_day=20` 时，`month=2026-08` 覆盖 `2026-07-21` 到 `2026-08-20`。月报统计会基于这些按天结果聚合。
+说明：`days` 为该用户结算周期内按天的考勤明细，字段和日报接口一致，用于前端按天展示当天是否异常、是否已补卡。`period_start` 和 `period_end` 为该月报实际覆盖日期；例如 `settlement_day=20` 时，`month=2026-08` 覆盖 `2026-07-21` 到 `2026-08-20`。未传 `month` 时，默认返回包含当前日期的结算周期。月报统计会基于这些按天结果聚合。
 
 ## 查询考勤汇总
 

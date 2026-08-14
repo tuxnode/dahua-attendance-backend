@@ -130,11 +130,11 @@ func (s *Service) ListMonthlyAttendance(ctx context.Context, query domain.Monthl
 		return nil, errors.New("service: repository is nil")
 	}
 
-	normalized := normalizeMonthlyAttendanceQuery(query, s.now())
 	settings, err := s.loadAttendanceSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
+	normalized := normalizeMonthlyAttendanceQuery(query, s.now(), settings.SettlementDay)
 	period := monthlyAttendancePeriod(normalized.Month, settings.SettlementDay)
 	dailies, err := s.listDailyAttendance(ctx, domain.DailyAttendanceQuery{
 		AttendancePersonFilter: normalized.AttendancePersonFilter,
@@ -249,10 +249,10 @@ func normalizeDailyAttendanceQuery(query domain.DailyAttendanceQuery, now time.T
 	return query, nil
 }
 
-func normalizeMonthlyAttendanceQuery(query domain.MonthlyAttendanceQuery, now time.Time) domain.MonthlyAttendanceQuery {
+func normalizeMonthlyAttendanceQuery(query domain.MonthlyAttendanceQuery, now time.Time, settlementDay int) domain.MonthlyAttendanceQuery {
 	query.AttendancePersonFilter = normalizeAttendancePersonFilter(query.AttendancePersonFilter)
 	if query.Month.IsZero() {
-		query.Month = firstDayOfMonth(now)
+		query.Month = settlementMonthForDate(now, settlementDay)
 	} else {
 		query.Month = firstDayOfMonth(query.Month)
 	}

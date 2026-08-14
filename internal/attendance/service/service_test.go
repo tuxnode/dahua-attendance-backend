@@ -995,6 +995,44 @@ func TestListMonthlyAttendanceUsesSettlementDay(t *testing.T) {
 	}
 }
 
+func TestListMonthlyAttendanceDefaultsToCurrentSettlementPeriod(t *testing.T) {
+	now := time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC)
+	repo := &fakeRepository{
+		settings: domain.AttendanceSettings{
+			Timezone:       "UTC",
+			DefaultShiftID: "day",
+			WeekendDays:    []time.Weekday{time.Saturday, time.Sunday},
+			SettlementDay:  20,
+		},
+	}
+	svc := service.New(
+		repo,
+		service.WithLogger(discardLogger()),
+		service.WithNow(func() time.Time { return now }),
+	)
+
+	records, err := svc.ListMonthlyAttendance(context.Background(), domain.MonthlyAttendanceQuery{
+		AttendancePersonFilter: domain.AttendancePersonFilter{UserID: "REDACTED_USER_ID"},
+	})
+	if err != nil {
+		t.Fatalf("list monthly attendance: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("unexpected monthly records length: %d", len(records))
+	}
+
+	record := records[0]
+	if record.Month.Format("2006-01") != "2026-09" {
+		t.Fatalf("unexpected default settlement month: %s", record.Month)
+	}
+	if record.PeriodStart.Format("2006-01-02") != "2026-08-21" {
+		t.Fatalf("unexpected period start: %s", record.PeriodStart)
+	}
+	if record.PeriodEnd.Format("2006-01-02") != "2026-09-20" {
+		t.Fatalf("unexpected period end: %s", record.PeriodEnd)
+	}
+}
+
 func TestGetAttendanceSummaryAggregatesRange(t *testing.T) {
 	date := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
 	repo := &fakeRepository{
